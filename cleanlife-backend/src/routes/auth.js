@@ -10,8 +10,8 @@ const router = express.Router();
 
 // UNIFIED LOGIN - Works for collectors AND clients
 router.post('/login', async (req, res) => {
-    const identifier = nonEmptyString(req.body.username) || 
-                       nonEmptyString(req.body.phone_number);
+    const identifier = nonEmptyString(req.body.username) ||
+                       nonEmptyString(req.body.phone_number)?.replace(/\s+/g, '');
     const password = nonEmptyString(req.body.password);
 
     if (!identifier || !password) {
@@ -27,7 +27,7 @@ router.post('/login', async (req, res) => {
             'SELECT * FROM find_collector_by_username($1)',
             [identifier]
         );
-        
+
         if (collectorResult.rows.length > 0) {
             const collector = collectorResult.rows[0];
             const passwordOk = await comparePassword(password, collector.password_hash);
@@ -51,17 +51,17 @@ router.post('/login', async (req, res) => {
                 'SELECT * FROM find_client_by_phone($1)',
                 [identifier]
             );
-            
+
             if (clientResult.rows.length > 0) {
                 const client = clientResult.rows[0];
-                
+
                 if (!client.password_hash) {
-                    return res.status(401).json({ 
+                    return res.status(401).json({
                         error: 'this account has no password set',
                         code: 'NO_PASSWORD_SET'
                     });
                 }
-                
+
                 const passwordOk = await comparePassword(password, client.password_hash);
                 if (passwordOk) {
                     user = {
@@ -127,16 +127,16 @@ router.post('/login', async (req, res) => {
 // REFRESH TOKEN
 router.post('/refresh', async (req, res) => {
     const { refresh_token } = req.body;
-    
+
     if (!refresh_token) {
         return res.status(400).json({ error: 'refresh token is required' });
     }
 
     try {
         const verification = verifyToken(refresh_token);
-        
+
         if (!verification.valid) {
-            return res.status(401).json({ 
+            return res.status(401).json({
                 error: verification.expired ? 'refresh token expired' : 'invalid refresh token'
             });
         }
@@ -149,7 +149,7 @@ router.post('/refresh', async (req, res) => {
             'SELECT id, username, collector_type, company_id, subscription_tier FROM collectors WHERE id = $1',
             [decoded.sub]
         );
-        
+
         if (collectorResult.rows.length > 0) {
             const collector = collectorResult.rows[0];
             user = {
@@ -183,7 +183,7 @@ router.post('/refresh', async (req, res) => {
         }
 
         const newAccessToken = signToken(user);
-        
+
         return res.json({
             access_token: newAccessToken,
             expires_in: process.env.JWT_EXPIRES_IN || '8h',

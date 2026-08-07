@@ -12,7 +12,7 @@ const router = express.Router();
 router.post('/register', async (req, res) => {
     const name = nonEmptyString(req.body.name);
     const email = nonEmptyString(req.body.email);
-    const phone_number = nonEmptyString(req.body.phone_number);
+    const phone_number = nonEmptyString(req.body.phone_number)?.replace(/\s+/g, '') || null;
     const password = nonEmptyString(req.body.password);
     const company_code = nonEmptyString(req.body.company_code);
 
@@ -31,14 +31,16 @@ router.post('/register', async (req, res) => {
     try {
         let company = null;
 
+        // [ONBOARD-01] Company Referral Code path (with format validation)
         if (company_code) {
             const normalizedCode = String(company_code).trim().toLowerCase();
-
+            if (!/^[a-z0-9-]{3,20}$/.test(normalizedCode)) {
+                return res.status(400).json({ error: 'company_code format invalid' });
+            }
             const companyResult = await pool.query(
                 'SELECT id, company_name, subscription_tier FROM companies WHERE lower(company_code) = $1',
                 [normalizedCode]
             );
-
             if (companyResult.rows.length === 0) {
                 return res.status(400).json({
                     error: 'invalid company_code'
