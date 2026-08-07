@@ -1,29 +1,46 @@
-const { verifyToken } = require('../utils/jwt');
+// backend/src/middleware/auth.js
+const { verifyTokenLegacy } = require('../utils/jwt');
 const config = require('../config/env');
 
-// Protects collector-facing routes. Expects "Authorization: Bearer <token>".
-function requireAuth(req, res, next) {
+const tokenBlacklist = new Set();
+
+async function requireAuth(req, res, next) {
     const header = req.headers.authorization || '';
     const [scheme, token] = header.split(' ');
 
     if (scheme !== 'Bearer' || !token) {
-        return res.status(401).json({ error: 'missing or malformed Authorization header' });
+        return res.status(401).json({ 
+            error: 'missing or malformed Authorization header',
+            code: 'MISSING_TOKEN'
+        });
+    }
+
+    if (tokenBlacklist.has(token)) {
+        return res.status(401).json({ 
+            error: 'token has been revoked',
+            code: 'TOKEN_REVOKED'
+        });
     }
 
     try {
-        req.collector = verifyToken(token);
-        req.user = req.collector;
+        const decoded = verifyTokenLegacy(token);
+        req.user = decoded;
+        req.collector = decoded;
         return next();
     } catch (err) {
-        return res.status(401).json({ error: 'invalid or expired token' });
+        if (err.name === 'TokenExpiredError') {
+            return res.status(401).json({ 
+                error: 'token expired',
+                code: 'TOKEN_EXPIRED'
+            });
+        }
+        return res.status(401).json({ 
+            error: 'invalid or expired token',
+            code: 'INVALID_TOKEN'
+        });
     }
 }
 
-// Protects the on-site corporate collector creation endpoint.
-// NOTE: the ER diagram has no admin/staff table yet, so this is a stand-in
-// shared-secret gate (ADMIN_API_KEY in .env) until a real admin/company-staff
-// entity and its own auth are designed. Flagging this so it isn't mistaken
-// for a production-grade admin auth system.
 function requireAdminKey(req, res, next) {
     const key = req.headers['x-admin-key'];
     if (!key || key !== config.adminApiKey) {
@@ -32,15 +49,62 @@ function requireAdminKey(req, res, next) {
     return next();
 }
 
-// Restricts a route to a specific JWT role ('client' or 'collector').
-// Must run after requireAuth.
-function requireRole(role) {
+function requireRole(allowedRoles) {
+    const roles = Array.isArray(allowedRoles) ? allowedRoles : [allowedRoles];
+    
     return (req, res, next) => {
-        if (!req.collector || req.collector.role !== role) {
-            return res.status(403).json({ error: `this action requires a ${role} account` });
+        if (!req.user && !req.collector) {
+            return res.status(401).json({ error: 'authentication required' });
+        }
+
+        const user = req.user || req.collector;
+        if (!roles.includes(user.role)) {
+            return res.status(403).json({ 
+                error: `requires one of these roles: ${roles.join(', ')}`,
+                your_role: user.role
+            });
         }
         return next();
     };
 }
 
-module.exports = { requireAuth, requireAdminKey, requireRole };
+function requireOwnership(req, res, next) {
+    if (!req.user && !req.collector) {
+        return res.status(401).json({ error: 'authentication required' });
+    }
+
+    const user = req.user || req.collector;
+
+    if (user.role === 'admin') {
+        return next();
+    }
+
+    const targetUserId = req.params.id || req.params.userId || req.params.collectorId ||
+                         req.params.clientId || req.body.user_id || req.body.client_id;
+
+    if (!targetUserId) {
+        return res.status(400).json({ error: 'user ID required' });
+    }
+
+    if (parseInt(user.sub) !== parseInt(targetUserId)) {
+        return res.status(403).json({ 
+            error: 'you can only access your own resources',
+            your_id: user.sub
+        });
+    }
+
+    next();
+}
+
+function blacklistToken(token) {
+    tokenBlacklist.add(token);
+}
+
+module.exports = {
+    requireAuth,
+    requireAdminKey,
+    requireRole,
+    requireOwnership,
+    blacklistToken,
+    tokenBlacklist,
+};
