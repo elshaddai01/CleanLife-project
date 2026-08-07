@@ -11,6 +11,7 @@ const walletRouter = require('./src/routes/wallet');
 const adminRouter = require('./src/routes/admin');
 const { startDispatchWorker } = require('./src/queues/dispatchWorker');
 const { pool, checkDatabaseConnection } = require('./src/db/pool');
+const profileRoutes =require('./routes/profile');
 
 const app = express();
 app.disable('x-powered-by');
@@ -30,6 +31,7 @@ app.use('/pickup-requests', pickupRequestsRouter);
 app.use('/pickup-requests', paymentAndProofRouter);
 app.use('/wallet', walletRouter);
 app.use('/admin', adminRouter);
+app.use('/profile',profileRoutes);
 
 app.get('/health', async (req, res) => {
     try {

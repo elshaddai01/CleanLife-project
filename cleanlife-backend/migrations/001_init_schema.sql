@@ -61,8 +61,7 @@ CREATE TABLE proof_of_works (
     exif_latitude           DECIMAL(9,6) NULL,
     exif_longitude          DECIMAL(9,6) NULL,
     is_verified             BOOLEAN NOT NULL DEFAULT false,
-    created_at              TIMESTAMP NOT NULL DEFAULT now()
-);
+    created_at              TIMESTAMP NOT NULL DEFAULT now
 
 CREATE INDEX idx_clients_company_id ON clients(company_id);
 CREATE INDEX idx_collectors_company_id ON collectors(company_id);
