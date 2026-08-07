@@ -48,7 +48,8 @@ router.post('/login', async (req, res) => {
 });
 
 router.post('/client/login', async (req, res) => {
-    const phone_number = nonEmptyString(req.body.phone_number);
+    // MODIFIED: strip all whitespace from phone number before validation and DB lookup
+    const phone_number = nonEmptyString(req.body.phone_number)?.replace(/\s+/g, '') || null;
     const password = nonEmptyString(req.body.password);
     if (!phone_number || !password) {
         return res.status(400).json({ error: 'phone_number and password are required' });
