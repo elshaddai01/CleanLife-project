@@ -1,4 +1,4 @@
-const express = require('express');
+ const express = require('express');
 const { pool, withTenant } = require('../db/pool');
 const { handleDbError } = require('../utils/dbErrors');
 const { hashPassword } = require('../utils/password');
