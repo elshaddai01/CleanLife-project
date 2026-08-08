@@ -1,4 +1,3 @@
-
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { NativeModules, Platform } from 'react-native';
 import type { PickupStatus, WasteType, VehicleType } from './types';
@@ -107,8 +106,20 @@ export interface CollectorAuthResult {
   };
 }
 
+interface RawLoginResponse {
+  message: string;
+  user: any;
+  tokens: { access_token: string; refresh_token: string };
+}
+
 export const authApi = {
-  registerClient(params: { name: string; phone_number: string; password: string; company_code?: string }) {
+  registerClient(params: {
+    name: string;
+    email: string;
+    phone_number: string;
+    password: string;
+    company_code?: string
+  }) {
     return request<{ id: number; name: string; phone_number: string; company_id: number | null; company_name: string | null; created_at: string }>(
       '/clients/register',
       { method: 'POST', body: JSON.stringify(params) }
@@ -116,24 +127,58 @@ export const authApi = {
   },
 
   loginClient(phone_number: string, password: string) {
-    return request<ClientAuthResult>('/auth/client/login', {
+    return request<RawLoginResponse>('/auth/login', {
       method: 'POST',
       body: JSON.stringify({ phone_number, password }),
-    });
+    }).then((res): ClientAuthResult => ({
+      token: res.tokens.access_token,
+      client: {
+        id: res.user.id,
+        name: res.user.name,
+        phone_number: res.user.phone_number,
+        company_id: res.user.company_id,
+      },
+    }));
   },
 
-  registerCollector(params: { username: string; password: string; subscription_tier?: 'Premium' | 'Gold' | 'Silver' }) {
-    return request<{ id: number; username: string; collector_type: string; company_id: number | null; subscription_tier: string; created_at: string }>(
+  registerCollector(params: {
+    username: string;
+    password: string;
+    name?: string;
+    email?: string;
+    phone_number?: string;
+    subscription_tier?: 'Premium' | 'Gold' | 'Silver'
+  }) {
+    return request<{
+      id: number;
+      username: string;
+      collector_type: string;
+      company_id: number | null;
+      subscription_tier: string;
+      full_name: string | null;
+      email: string | null;
+      phone_number: string | null;
+      created_at: string
+    }>(
       '/collectors/register',
       { method: 'POST', body: JSON.stringify(params) }
     );
   },
 
   loginCollector(username: string, password: string) {
-    return request<CollectorAuthResult>('/auth/login', {
+    return request<RawLoginResponse>('/auth/login', {
       method: 'POST',
       body: JSON.stringify({ username, password }),
-    });
+    }).then((res): CollectorAuthResult => ({
+      token: res.tokens.access_token,
+      collector: {
+        id: res.user.id,
+        username: res.user.username,
+        collector_type: res.user.collector_type,
+        company_id: res.user.company_id,
+        subscription_tier: res.user.subscription_tier,
+      },
+    }));
   },
 };
 

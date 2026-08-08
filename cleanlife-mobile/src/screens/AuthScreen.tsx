@@ -24,6 +24,7 @@ export default function AuthScreen({ initialRole, onAuthenticated, onBack }: Pro
   const [mode, setMode] = useState<'login' | 'register'>('login');
 
   const [name, setName] = useState('');
+  const [email, setEmail] = useState('');
   const [phone, setPhone] = useState('');
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
@@ -35,20 +36,39 @@ export default function AuthScreen({ initialRole, onAuthenticated, onBack }: Pro
       Alert.alert('Invalid password', 'Password must be at least 8 characters.');
       return;
     }
-    if (role === 'client' && (!phone.trim() || (mode === 'register' && !name.trim()))) {
-      Alert.alert('Missing details', mode === 'register' ? 'Name and phone number are required.' : 'Phone number is required.');
-      return;
+
+    if (mode === 'register') {
+      if (!name.trim() || !email.trim() || !phone.trim()) {
+        Alert.alert('Missing details', 'Name, email, and phone number are required for registration.');
+        return;
+      }
+      if (!email.includes('@')) {
+        Alert.alert('Invalid email', 'Please enter a valid email address.');
+        return;
+      }
+      // For collector registration, username is also required
+      if (role === 'collector' && !username.trim()) {
+        Alert.alert('Missing username', 'Username is required.');
+        return;
+      }
+    } else {
+      if (role === 'client' && !phone.trim()) {
+        Alert.alert('Missing phone number', 'Phone number is required.');
+        return;
+      }
+      if (role === 'collector' && !username.trim()) {
+        Alert.alert('Missing username', 'Username is required.');
+        return;
+      }
     }
-    if (role === 'collector' && !username.trim()) {
-      Alert.alert('Missing username', 'Username is required.');
-      return;
-    }
+
     setLoading(true);
     try {
       if (role === 'client') {
         if (mode === 'register') {
           await authApi.registerClient({
             name,
+            email,
             phone_number: phone,
             password,
             company_code: companyCode || undefined,
@@ -59,7 +79,14 @@ export default function AuthScreen({ initialRole, onAuthenticated, onBack }: Pro
         onAuthenticated('client');
       } else {
         if (mode === 'register') {
-          await authApi.registerCollector({ username, password });
+          // Correct mapping: username → username, name → name
+          await authApi.registerCollector({
+            username,
+            password,
+            name,
+            email,
+            phone_number: phone,
+          });
         }
         const result = await authApi.loginCollector(username, password);
         await setSession(result.token, 'collector', result.collector.id);
@@ -75,71 +102,119 @@ export default function AuthScreen({ initialRole, onAuthenticated, onBack }: Pro
 
   return (
     <KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-    <ScrollView contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled">
-      <Pressable onPress={onBack} style={styles.backButton}>
-        <Text style={styles.backText}>← Back to role selection</Text>
-      </Pressable>
-      <Text style={styles.title}>CleanLife</Text>
-      <Text style={styles.subtitle}>
-        {role === 'client' ? 'Client account' : 'Collector account'}
-      </Text>
-
-      <View style={styles.toggleRow}>
-        <Pressable
-          style={[styles.toggleButton, mode === 'login' && styles.toggleButtonActive]}
-          onPress={() => setMode('login')}
-        >
-          <Text style={mode === 'login' ? styles.toggleTextActive : styles.toggleText}>Log in</Text>
+      <ScrollView contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled">
+        <Pressable onPress={onBack} style={styles.backButton}>
+          <Text style={styles.backText}>← Back to role selection</Text>
         </Pressable>
-        <Pressable
-          style={[styles.toggleButton, mode === 'register' && styles.toggleButtonActive]}
-          onPress={() => setMode('register')}
-        >
-          <Text style={mode === 'register' ? styles.toggleTextActive : styles.toggleText}>Register</Text>
-        </Pressable>
-      </View>
+        <Text style={styles.title}>CleanLife</Text>
+        <Text style={styles.subtitle}>
+          {role === 'client' ? 'Client account' : 'Collector account'}
+        </Text>
 
-      {role === 'client' ? (
-        <>
-          {mode === 'register' && (
-            <TextInput style={styles.input} placeholder="Name" value={name} onChangeText={setName} />
-          )}
-          <TextInput
-            style={styles.input}
-            placeholder="Phone number"
-            value={phone}
-            onChangeText={setPhone}
-            keyboardType="phone-pad"
-          />
-          {mode === 'register' && (
-            <TextInput
-              style={styles.input}
-              placeholder="Company code (optional)"
-              value={companyCode}
-              onChangeText={setCompanyCode}
-            />
-          )}
-        </>
-      ) : (
-        <TextInput style={styles.input} placeholder="Username" value={username} onChangeText={setUsername} />
-      )}
+        <View style={styles.toggleRow}>
+          <Pressable
+            style={[styles.toggleButton, mode === 'login' && styles.toggleButtonActive]}
+            onPress={() => setMode('login')}
+          >
+            <Text style={mode === 'login' ? styles.toggleTextActive : styles.toggleText}>Log in</Text>
+          </Pressable>
+          <Pressable
+            style={[styles.toggleButton, mode === 'register' && styles.toggleButtonActive]}
+            onPress={() => setMode('register')}
+          >
+            <Text style={mode === 'register' ? styles.toggleTextActive : styles.toggleText}>Register</Text>
+          </Pressable>
+        </View>
 
-      <TextInput
-        style={styles.input}
-        placeholder="Password"
-        value={password}
-        onChangeText={setPassword}
-        secureTextEntry
-      />
-
-      <Pressable style={styles.submitButton} onPress={handleSubmit} disabled={loading}>
-        {loading ? (
-          <ActivityIndicator color="#fff" />
+        {role === 'client' ? (
+          <>
+            {mode === 'register' && (
+              <>
+                <TextInput style={styles.input} placeholder="Full Name" value={name} onChangeText={setName} />
+                <TextInput
+                  style={styles.input}
+                  placeholder="Email"
+                  value={email}
+                  onChangeText={setEmail}
+                  keyboardType="email-address"
+                  autoCapitalize="none"
+                />
+                <TextInput
+                  style={styles.input}
+                  placeholder="Phone number"
+                  value={phone}
+                  onChangeText={setPhone}
+                  keyboardType="phone-pad"
+                />
+                <TextInput
+                  style={styles.input}
+                  placeholder="Company code (optional)"
+                  value={companyCode}
+                  onChangeText={setCompanyCode}
+                />
+              </>
+            )}
+            {mode === 'login' && (
+              <TextInput
+                style={styles.input}
+                placeholder="Phone number"
+                value={phone}
+                onChangeText={setPhone}
+                keyboardType="phone-pad"
+              />
+            )}
+          </>
         ) : (
-          <Text style={styles.submitText}>{mode === 'register' ? 'Register & log in' : 'Log in'}</Text>
+          // Collector
+          <>
+            {mode === 'register' && (
+              <>
+                <TextInput style={styles.input} placeholder="Full Name" value={name} onChangeText={setName} />
+                <TextInput
+                  style={styles.input}
+                  placeholder="Email"
+                  value={email}
+                  onChangeText={setEmail}
+                  keyboardType="email-address"
+                  autoCapitalize="none"
+                />
+                <TextInput
+                  style={styles.input}
+                  placeholder="Phone number"
+                  value={phone}
+                  onChangeText={setPhone}
+                  keyboardType="phone-pad"
+                />
+                <TextInput
+                  style={styles.input}
+                  placeholder="Username"
+                  value={username}
+                  onChangeText={setUsername}
+                />
+              </>
+            )}
+            {mode === 'login' && (
+              <TextInput style={styles.input} placeholder="Username" value={username} onChangeText={setUsername} />
+            )}
+          </>
         )}
-      </Pressable>
-    </ScrollView>
+
+        <TextInput
+          style={styles.input}
+          placeholder="Password"
+          value={password}
+          onChangeText={setPassword}
+          secureTextEntry
+        />
+
+        <Pressable style={styles.submitButton} onPress={handleSubmit} disabled={loading}>
+          {loading ? (
+            <ActivityIndicator color="#fff" />
+          ) : (
+            <Text style={styles.submitText}>{mode === 'register' ? 'Register & log in' : 'Log in'}</Text>
+          )}
+        </Pressable>
+      </ScrollView>
     </KeyboardAvoidingView>
   );
 }
