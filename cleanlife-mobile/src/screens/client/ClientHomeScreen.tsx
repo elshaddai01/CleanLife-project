@@ -7,6 +7,7 @@ type Props = {
   onOpenWallet: () => void;
   onViewRequests: () => void;
   onOpenTracking: (requestId: number) => void;
+  onOpenProfile: () => void;
   onLogout: () => void;
   lastRequestId: number | null;
   onRecentRequest: (requestId: number) => void;
@@ -17,6 +18,7 @@ export default function ClientHomeScreen({
   onOpenWallet,
   onViewRequests,
   onOpenTracking,
+  onOpenProfile,
   onLogout,
   lastRequestId,
   onRecentRequest,
@@ -86,6 +88,10 @@ export default function ClientHomeScreen({
         <Text style={styles.historyTitle}>View all requests</Text>
         <Text style={styles.historySubtitle}>Open your complete pickup history →</Text>
       </Pressable>
+
+      <Pressable style={styles.profileButton} onPress={onOpenProfile}>
+        <Text style={styles.profileText}>My profile</Text>
+      </Pressable>
     </ScrollView>
   );
 }
@@ -121,4 +127,6 @@ const styles = StyleSheet.create({
   trackSubtitle: { fontSize: 13, color: '#059669', marginTop: 4 },
   historyButton: { marginTop: 14, backgroundColor: '#fff', borderWidth: 1, borderColor: '#cbd5e1', borderRadius: 14, padding: 16 },
   historyTitle: { color: '#1e293b', fontWeight: '800' }, historySubtitle: { color: '#64748b', fontSize: 12, marginTop: 4 },
+  profileButton: { marginTop: 14, paddingVertical: 14, alignItems: 'center' },
+  profileText: { color: '#475569', fontWeight: '700' },
 });

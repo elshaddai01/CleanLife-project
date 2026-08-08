@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { ActivityIndicator, Alert, KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
-import { ApiError, getStoredUserId, kycApi, telemetryApi } from '../../apiClient';
+import { ApiError, getStoredUserId, kycApi, profileApi, telemetryApi } from '../../apiClient';
 
 type Props = { onBack: () => void; onSessionExpired: () => void };
 type Profile = Awaited<ReturnType<typeof kycApi.getCollectorProfile>>;
@@ -14,9 +14,15 @@ export default function CollectorProfileScreen({ onBack, onSessionExpired }: Pro
   const [areaId, setAreaId] = useState('');
   const [checkingIn, setCheckingIn] = useState(false);
 
+  const [editName, setEditName] = useState('');
+  const [editEmail, setEditEmail] = useState('');
+  const [editPhone, setEditPhone] = useState('');
+  const [savingProfile, setSavingProfile] = useState(false);
+
   const load = useCallback(async () => {
     try {
-      setProfile(await kycApi.getCollectorProfile());
+      const result = await kycApi.getCollectorProfile();
+      setProfile(result);
     } catch (err) {
       if (err instanceof ApiError && err.status === 401) return onSessionExpired();
       Alert.alert('Could not load profile', err instanceof ApiError ? err.message : String(err));
@@ -55,6 +61,29 @@ export default function CollectorProfileScreen({ onBack, onSessionExpired }: Pro
     }
   };
 
+  const saveProfile = async () => {
+    if (!editName.trim() && !editEmail.trim() && !editPhone.trim()) {
+      return Alert.alert('Nothing to save', 'Enter at least one field to update.');
+    }
+    setSavingProfile(true);
+    try {
+      await profileApi.updateCollector({
+        name: editName.trim() || undefined,
+        email: editEmail.trim() || undefined,
+        phone_number: editPhone.trim() || undefined,
+      });
+      setEditName('');
+      setEditEmail('');
+      setEditPhone('');
+      Alert.alert('Saved', 'Your profile has been updated.');
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 401) return onSessionExpired();
+      Alert.alert('Update failed', err instanceof ApiError ? err.message : String(err));
+    } finally {
+      setSavingProfile(false);
+    }
+  };
+
   if (loading) return <View style={styles.center}><ActivityIndicator color="#0891b2" /></View>;
 
   return (
@@ -62,11 +91,23 @@ export default function CollectorProfileScreen({ onBack, onSessionExpired }: Pro
       <ScrollView contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled">
         <Pressable onPress={onBack}><Text style={styles.back}>← Back</Text></Pressable>
         <Text style={styles.title}>Collector profile</Text>
+
         <View style={styles.card}>
           <Text style={styles.name}>{profile?.username}</Text>
           <Text style={styles.detail}>{profile?.collector_type} · {profile?.subscription_tier || 'No tier'}</Text>
           <Text style={styles.status}>KYC: {profile?.kyc_status || 'unverified'}</Text>
         </View>
+
+        <View style={styles.card}>
+          <Text style={styles.sectionTitle}>Edit contact info</Text>
+          <TextInput style={styles.input} placeholder="Full name" value={editName} onChangeText={setEditName} />
+          <TextInput style={styles.input} placeholder="Email" value={editEmail} onChangeText={setEditEmail} autoCapitalize="none" keyboardType="email-address" />
+          <TextInput style={styles.input} placeholder="Phone number" value={editPhone} onChangeText={setEditPhone} keyboardType="phone-pad" />
+          <Pressable style={styles.button} onPress={saveProfile} disabled={savingProfile}>
+            {savingProfile ? <ActivityIndicator color="#fff" /> : <Text style={styles.buttonText}>Save changes</Text>}
+          </Pressable>
+        </View>
+
         <View style={styles.card}>
           <Text style={styles.sectionTitle}>Availability area</Text>
           <TextInput style={styles.input} placeholder="Sector or area ID" value={areaId} onChangeText={setAreaId} />
@@ -74,6 +115,7 @@ export default function CollectorProfileScreen({ onBack, onSessionExpired }: Pro
             {checkingIn ? <ActivityIndicator color="#fff" /> : <Text style={styles.buttonText}>Check in to this area</Text>}
           </Pressable>
         </View>
+
         {profile?.kyc_status !== 'verified' && (
           <View style={styles.card}>
             <Text style={styles.sectionTitle}>Submit KYC document</Text>
