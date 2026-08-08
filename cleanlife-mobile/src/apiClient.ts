@@ -361,3 +361,28 @@ export const uploadApi = {
     });
   },
 };
+
+// ---------- Profile ----------
+
+export const profileApi = {
+  getMe() {
+    return request<{ user: any }>('/auth/me');
+  },
+  updateClient(clientId: number, params: { name?: string; email?: string }) {
+    return request<{ id: number; name: string; email: string; phone_number: string; company_id: number | null }>(
+      `/clients/${clientId}/profile`,
+      { method: 'PUT', body: JSON.stringify(params) }
+    );
+  },
+  updateCollector(params: { name?: string; email?: string; phone_number?: string }) {
+    return request<{
+      id: number;
+      username: string;
+      full_name: string | null;
+      email: string | null;
+      phone_number: string | null;
+      collector_type: string;
+      subscription_tier: string | null;
+    }>('/collectors/me/profile', { method: 'PUT', body: JSON.stringify(params) });
+  },
+};

@@ -9,14 +9,14 @@ async function requireAuth(req, res, next) {
     const [scheme, token] = header.split(' ');
 
     if (scheme !== 'Bearer' || !token) {
-        return res.status(401).json({ 
+        return res.status(401).json({
             error: 'missing or malformed Authorization header',
             code: 'MISSING_TOKEN'
         });
     }
 
     if (tokenBlacklist.has(token)) {
-        return res.status(401).json({ 
+        return res.status(401).json({
             error: 'token has been revoked',
             code: 'TOKEN_REVOKED'
         });
@@ -29,12 +29,12 @@ async function requireAuth(req, res, next) {
         return next();
     } catch (err) {
         if (err.name === 'TokenExpiredError') {
-            return res.status(401).json({ 
+            return res.status(401).json({
                 error: 'token expired',
                 code: 'TOKEN_EXPIRED'
             });
         }
-        return res.status(401).json({ 
+        return res.status(401).json({
             error: 'invalid or expired token',
             code: 'INVALID_TOKEN'
         });
@@ -51,7 +51,7 @@ function requireAdminKey(req, res, next) {
 
 function requireRole(allowedRoles) {
     const roles = Array.isArray(allowedRoles) ? allowedRoles : [allowedRoles];
-    
+
     return (req, res, next) => {
         if (!req.user && !req.collector) {
             return res.status(401).json({ error: 'authentication required' });
@@ -59,8 +59,29 @@ function requireRole(allowedRoles) {
 
         const user = req.user || req.collector;
         if (!roles.includes(user.role)) {
-            return res.status(403).json({ 
+            return res.status(403).json({
                 error: `requires one of these roles: ${roles.join(', ')}`,
+                your_role: user.role
+            });
+        }
+        return next();
+    };
+}
+
+// [ADMIN-IDENTITY-02] Same pattern as requireRole, kept as a separate name
+// so it's obvious at a glance which routes are gated by real admin login
+// (super_admin/company_admin) versus client/collector roles.
+function requireAdminRole(allowedRoles) {
+    const roles = Array.isArray(allowedRoles) ? allowedRoles : [allowedRoles];
+
+    return (req, res, next) => {
+        const user = req.user || req.collector;
+        if (!user) {
+            return res.status(401).json({ error: 'authentication required' });
+        }
+        if (!roles.includes(user.role)) {
+            return res.status(403).json({
+                error: `requires one of these admin roles: ${roles.join(', ')}`,
                 your_role: user.role
             });
         }
@@ -87,7 +108,7 @@ function requireOwnership(req, res, next) {
     }
 
     if (parseInt(user.sub) !== parseInt(targetUserId)) {
-        return res.status(403).json({ 
+        return res.status(403).json({
             error: 'you can only access your own resources',
             your_id: user.sub
         });
@@ -104,6 +125,7 @@ module.exports = {
     requireAuth,
     requireAdminKey,
     requireRole,
+    requireAdminRole,
     requireOwnership,
     blacklistToken,
     tokenBlacklist,
