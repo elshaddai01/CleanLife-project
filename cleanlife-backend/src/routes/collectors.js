@@ -19,10 +19,13 @@ router.get('/me', requireAuth, async (req, res) => {
 });
 
 // [ONBOARD-03a] Independent self-registration — public endpoint.
-// Body: { username, password, subscription_tier? } (defaults to 'Silver')
+// Body: { username, password, name?, email?, phone_number?, subscription_tier? }
 router.post('/register', async (req, res) => {
     const username = nonEmptyString(req.body.username);
     const password = nonEmptyString(req.body.password);
+    const full_name = nonEmptyString(req.body.name);
+    const email = nonEmptyString(req.body.email);
+    const phone_number = nonEmptyString(req.body.phone_number)?.replace(/\s+/g, '') || null;
     const { subscription_tier } = req.body;
 
     if (!username || !password) {
@@ -42,10 +45,10 @@ router.post('/register', async (req, res) => {
 
         const created = await withTenant(null, async (client) => {
             const result = await client.query(
-                `INSERT INTO collectors (username, password_hash, collector_type, company_id, subscription_tier)
-                 VALUES ($1, $2, 'independent', NULL, $3)
-                 RETURNING id, username, collector_type, company_id, subscription_tier, created_at`,
-                [username, password_hash, tier]
+                `INSERT INTO collectors (username, password_hash, collector_type, company_id, subscription_tier, full_name, email, phone_number)
+                 VALUES ($1, $2, 'independent', NULL, $3, $4, $5, $6)
+                 RETURNING id, username, collector_type, company_id, subscription_tier, full_name, email, phone_number, created_at`,
+                [username, password_hash, tier, full_name, email, phone_number]
             );
             return result.rows[0];
         });

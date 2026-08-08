@@ -81,11 +81,9 @@ router.post('/login', async (req, res) => {
             return res.status(401).json({ error: 'invalid credentials' });
         }
 
-        // Generate tokens
         const accessToken = signToken(user);
         const refreshToken = signRefreshToken(user);
 
-        // Update last login
         if (userType === 'collector') {
             await pool.query('UPDATE collectors SET last_login = NOW() WHERE id = $1', [user.id]);
         } else if (userType === 'client') {
@@ -143,7 +141,6 @@ router.post('/refresh', async (req, res) => {
 
         const { decoded } = verification;
 
-        // Check if user exists
         let user = null;
         const collectorResult = await pool.query(
             'SELECT id, username, collector_type, company_id, subscription_tier FROM collectors WHERE id = $1',
