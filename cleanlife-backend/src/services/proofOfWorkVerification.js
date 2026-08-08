@@ -1,4 +1,5 @@
 const { pool } = require('../db/pool');
+const config = require('../config/env');
 
 const GEOFENCE_RADIUS_METERS = 100;
 
@@ -31,14 +32,19 @@ async function findDumpsterByBinCode(binCode) {
 
 // Returns { isVerified, verificationMethod, dumpsterId }
 async function verifyDisposal({ exifLatitude, exifLongitude, binCode }) {
+    // [DEV-BYPASS] When AUTO_VERIFY_GPS_PROOF is enabled (default true unless
+    // explicitly set to 'false' in .env), skip the real geofence/bin-code
+    // check entirely — for local testing without seeded dumpster data.
+    // MUST be disabled before any real deployment.
+    if (config.autoVerifyGpsProof) {
+        return { isVerified: true, verificationMethod: 'gps', dumpsterId: null };
+    }
+
     if (binCode) {
         const dumpster = await findDumpsterByBinCode(binCode);
         if (dumpster) {
             return { isVerified: true, verificationMethod: 'bin_code', dumpsterId: dumpster.id };
         }
-        // An invalid/unknown code does NOT silently fall back to GPS — an
-        // explicit but wrong code is a distinct failure mode worth flagging
-        // rather than masking with a GPS retry the collector didn't ask for.
         return { isVerified: false, verificationMethod: 'bin_code', dumpsterId: null };
     }
 
