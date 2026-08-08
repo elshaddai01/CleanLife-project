@@ -1,3 +1,4 @@
+
 import React, { useState } from 'react';
 import {
   View,
@@ -30,7 +31,11 @@ export default function AuthScreen({ initialRole, onAuthenticated, onBack }: Pro
   const [companyCode, setCompanyCode] = useState('');
   const [loading, setLoading] = useState(false);
 
+  // ============================================================
+  // ✅ UPDATED handleSubmit function for unified JWT authentication
+  // ============================================================
   const handleSubmit = async () => {
+    // Validation
     if (password.length < 8) {
       Alert.alert('Invalid password', 'Password must be at least 8 characters.');
       return;
@@ -43,26 +48,52 @@ export default function AuthScreen({ initialRole, onAuthenticated, onBack }: Pro
       Alert.alert('Missing username', 'Username is required.');
       return;
     }
+    
     setLoading(true);
     try {
       if (role === 'client') {
+        // Register client if in register mode
         if (mode === 'register') {
           await authApi.registerClient({
-            name,
-            phone_number: phone,
+            name: name.trim(),
+            phone_number: phone.trim(),
             password,
-            company_code: companyCode || undefined,
+            company_code: companyCode.trim() || undefined,
           });
         }
-        const result = await authApi.loginClient(phone, password);
-        await setSession(result.token, 'client', result.client.id);
+        
+        // ✅ UNIFIED LOGIN - Works for clients
+        const result = await authApi.loginClient(phone.trim(), password);
+        
+        // ✅ Store session with access token, refresh token, and user data
+        await setSession(
+          result.tokens.access_token,    // Access token
+          'client',                      // Role
+          result.user.id,                // User ID
+          result.user,                   // User data (NEW)
+          result.tokens.refresh_token    // Refresh token (NEW)
+        );
         onAuthenticated('client');
       } else {
+        // Register collector if in register mode
         if (mode === 'register') {
-          await authApi.registerCollector({ username, password });
+          await authApi.registerCollector({
+            username: username.trim(),
+            password,
+          });
         }
-        const result = await authApi.loginCollector(username, password);
-        await setSession(result.token, 'collector', result.collector.id);
+        
+        // ✅ UNIFIED LOGIN - Works for collectors
+        const result = await authApi.loginCollector(username.trim(), password);
+        
+        // ✅ Store session with access token, refresh token, and user data
+        await setSession(
+          result.tokens.access_token,    // Access token
+          'collector',                   // Role
+          result.user.id,                // User ID
+          result.user,                   // User data (NEW)
+          result.tokens.refresh_token    // Refresh token (NEW)
+        );
         onAuthenticated('collector');
       }
     } catch (err) {
@@ -75,71 +106,71 @@ export default function AuthScreen({ initialRole, onAuthenticated, onBack }: Pro
 
   return (
     <KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-    <ScrollView contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled">
-      <Pressable onPress={onBack} style={styles.backButton}>
-        <Text style={styles.backText}>← Back to role selection</Text>
-      </Pressable>
-      <Text style={styles.title}>CleanLife</Text>
-      <Text style={styles.subtitle}>
-        {role === 'client' ? 'Client account' : 'Collector account'}
-      </Text>
-
-      <View style={styles.toggleRow}>
-        <Pressable
-          style={[styles.toggleButton, mode === 'login' && styles.toggleButtonActive]}
-          onPress={() => setMode('login')}
-        >
-          <Text style={mode === 'login' ? styles.toggleTextActive : styles.toggleText}>Log in</Text>
+      <ScrollView contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled">
+        <Pressable onPress={onBack} style={styles.backButton}>
+          <Text style={styles.backText}>← Back to role selection</Text>
         </Pressable>
-        <Pressable
-          style={[styles.toggleButton, mode === 'register' && styles.toggleButtonActive]}
-          onPress={() => setMode('register')}
-        >
-          <Text style={mode === 'register' ? styles.toggleTextActive : styles.toggleText}>Register</Text>
-        </Pressable>
-      </View>
+        <Text style={styles.title}>CleanLife</Text>
+        <Text style={styles.subtitle}>
+          {role === 'client' ? 'Client account' : 'Collector account'}
+        </Text>
 
-      {role === 'client' ? (
-        <>
-          {mode === 'register' && (
-            <TextInput style={styles.input} placeholder="Name" value={name} onChangeText={setName} />
-          )}
-          <TextInput
-            style={styles.input}
-            placeholder="Phone number"
-            value={phone}
-            onChangeText={setPhone}
-            keyboardType="phone-pad"
-          />
-          {mode === 'register' && (
+        <View style={styles.toggleRow}>
+          <Pressable
+            style={[styles.toggleButton, mode === 'login' && styles.toggleButtonActive]}
+            onPress={() => setMode('login')}
+          >
+            <Text style={mode === 'login' ? styles.toggleTextActive : styles.toggleText}>Log in</Text>
+          </Pressable>
+          <Pressable
+            style={[styles.toggleButton, mode === 'register' && styles.toggleButtonActive]}
+            onPress={() => setMode('register')}
+          >
+            <Text style={mode === 'register' ? styles.toggleTextActive : styles.toggleText}>Register</Text>
+          </Pressable>
+        </View>
+
+        {role === 'client' ? (
+          <>
+            {mode === 'register' && (
+              <TextInput style={styles.input} placeholder="Name" value={name} onChangeText={setName} />
+            )}
             <TextInput
               style={styles.input}
-              placeholder="Company code (optional)"
-              value={companyCode}
-              onChangeText={setCompanyCode}
+              placeholder="Phone number"
+              value={phone}
+              onChangeText={setPhone}
+              keyboardType="phone-pad"
             />
-          )}
-        </>
-      ) : (
-        <TextInput style={styles.input} placeholder="Username" value={username} onChangeText={setUsername} />
-      )}
-
-      <TextInput
-        style={styles.input}
-        placeholder="Password"
-        value={password}
-        onChangeText={setPassword}
-        secureTextEntry
-      />
-
-      <Pressable style={styles.submitButton} onPress={handleSubmit} disabled={loading}>
-        {loading ? (
-          <ActivityIndicator color="#fff" />
+            {mode === 'register' && (
+              <TextInput
+                style={styles.input}
+                placeholder="Company code (optional)"
+                value={companyCode}
+                onChangeText={setCompanyCode}
+              />
+            )}
+          </>
         ) : (
-          <Text style={styles.submitText}>{mode === 'register' ? 'Register & log in' : 'Log in'}</Text>
+          <TextInput style={styles.input} placeholder="Username" value={username} onChangeText={setUsername} />
         )}
-      </Pressable>
-    </ScrollView>
+
+        <TextInput
+          style={styles.input}
+          placeholder="Password"
+          value={password}
+          onChangeText={setPassword}
+          secureTextEntry
+        />
+
+        <Pressable style={styles.submitButton} onPress={handleSubmit} disabled={loading}>
+          {loading ? (
+            <ActivityIndicator color="#fff" />
+          ) : (
+            <Text style={styles.submitText}>{mode === 'register' ? 'Register & log in' : 'Log in'}</Text>
+          )}
+        </Pressable>
+      </ScrollView>
     </KeyboardAvoidingView>
   );
 }

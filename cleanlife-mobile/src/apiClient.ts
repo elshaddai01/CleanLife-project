@@ -1,15 +1,14 @@
-
+// src/apiClient.ts
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { NativeModules, Platform } from 'react-native';
 import type { PickupStatus, WasteType, VehicleType } from './types';
 
+// ============ CONFIGURATION ============
 function getApiBaseUrl() {
   const configuredUrl = process.env.EXPO_PUBLIC_API_BASE_URL?.trim();
+  console.log('DEBUG configueredUrl:', configuredUrl);
   const apiPort = process.env.EXPO_PUBLIC_API_PORT?.trim() || '3001';
 
-  // In Expo Go/development, the JS bundle is served by Metro on the same
-  // computer as the API. Reading that URL gives us the correct LAN address
-  // even when Wi-Fi/hotspot networks change.
   if (__DEV__) {
     const scriptUrl = NativeModules.SourceCode?.scriptURL as string | undefined;
     if (scriptUrl) {
@@ -18,7 +17,7 @@ function getApiBaseUrl() {
         const isLoopback = metroHost === 'localhost' || metroHost === '127.0.0.1' || metroHost === '::1';
         if (metroHost && !isLoopback) return `http://${metroHost}:${apiPort}`;
       } catch {
-        // Fall through to an explicit URL or platform-local development host.
+        // Fall through
       }
     }
   }
@@ -28,12 +27,21 @@ function getApiBaseUrl() {
 }
 
 export const API_BASE = getApiBaseUrl();
+
+// ============ STORAGE KEYS ============
 const TOKEN_KEY = 'cleanlife_auth_token';
+const REFRESH_TOKEN_KEY = 'cleanlife_refresh_token';  // ✅ NEW
 const ROLE_KEY = 'cleanlife_auth_role';
 const USER_ID_KEY = 'cleanlife_auth_user_id';
+const USER_KEY = 'cleanlife_auth_user';  // ✅ NEW
 
+// ============ STORAGE HELPERS ============
 export async function getToken(): Promise<string | null> {
   return AsyncStorage.getItem(TOKEN_KEY);
+}
+
+export async function getRefreshToken(): Promise<string | null> {  // ✅ NEW
+  return AsyncStorage.getItem(REFRESH_TOKEN_KEY);
 }
 
 export async function getStoredRole(): Promise<'client' | 'collector' | null> {
@@ -45,31 +53,83 @@ export async function getStoredUserId(): Promise<number | null> {
   return raw ? Number(raw) : null;
 }
 
-export async function setSession(token: string, role: 'client' | 'collector', userId: number) {
+export async function getStoredUser(): Promise<any | null> {  // ✅ NEW
+  const raw = await AsyncStorage.getItem(USER_KEY);
+  return raw ? JSON.parse(raw) : null;
+}
+
+// ✅ UPDATED - Now stores refresh token and user
+export async function setSession(
+  token: string, 
+  role: 'client' | 'collector', 
+  userId: number, 
+  user?: any,
+  refreshToken?: string
+) {
   await AsyncStorage.setItem(TOKEN_KEY, token);
   await AsyncStorage.setItem(ROLE_KEY, role);
   await AsyncStorage.setItem(USER_ID_KEY, String(userId));
-}
-
-export async function clearSession() {
-  await AsyncStorage.multiRemove([TOKEN_KEY, ROLE_KEY, USER_ID_KEY]);
-}
-
-export class ApiError extends Error {
-  status: number;
-  constructor(status: number, message: string) {
-    super(message);
-    this.status = status;
+  if (refreshToken) {
+    await AsyncStorage.setItem(REFRESH_TOKEN_KEY, refreshToken);
+  }
+  if (user) {
+    await AsyncStorage.setItem(USER_KEY, JSON.stringify(user));
   }
 }
 
-async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
+// ✅ UPDATED - Now clears refresh token and user
+export async function clearSession() {
+  await AsyncStorage.multiRemove([TOKEN_KEY, REFRESH_TOKEN_KEY, ROLE_KEY, USER_ID_KEY, USER_KEY]);
+}
+
+// ============ ERROR HANDLING ============
+export class ApiError extends Error {
+  status: number;
+  code?: string;  // ✅ NEW
+  constructor(status: number, message: string, code?: string) {
+    super(message);
+    this.status = status;
+    this.code = code;
+    this.name = 'ApiError';
+  }
+}
+
+// ============ REFRESH TOKEN ============
+async function refreshAccessToken(): Promise<string | null> {  // ✅ NEW
+  try {
+    const refreshToken = await getRefreshToken();
+    if (!refreshToken) return null;
+
+    const response = await fetch(`${API_BASE}/auth/refresh`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ refresh_token: refreshToken }),
+    });
+
+    if (!response.ok) {
+      await clearSession();
+      return null;
+    }
+
+    const data = await response.json();
+    if (data.access_token) {
+      await AsyncStorage.setItem(TOKEN_KEY, data.access_token);
+      return data.access_token;
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+// ============ API REQUEST ============
+async function request<T>(path: string, options: RequestInit = {}, requireAuth: boolean = true): Promise<T> {
   const token = await getToken();
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
     ...(options.headers as Record<string, string> | undefined),
   };
-  if (token) {
+  if (requireAuth && token) {
     headers['Authorization'] = `Bearer ${token}`;
   }
 
@@ -83,10 +143,51 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   const body = isJson ? await res.json() : null;
 
   if (!res.ok) {
+    // ✅ NEW - Handle token expiration and auto-refresh
+    if (res.status === 401 && body?.code === 'TOKEN_EXPIRED') {
+      const newToken = await refreshAccessToken();
+      if (newToken) {
+        headers['Authorization'] = `Bearer ${newToken}`;
+        const retryRes = await fetch(`${API_BASE}${path}`, { ...options, headers });
+        const retryBody = retryRes.headers.get('content-type')?.includes('application/json') 
+          ? await retryRes.json() 
+          : null;
+        if (retryRes.ok) {
+          return retryBody as T;
+        }
+      }
+      throw new ApiError(401, 'Session expired. Please login again.', 'TOKEN_EXPIRED');
+    }
+    
     const message = (body && (body.error || body.message)) || `Request failed with status ${res.status}`;
-    throw new ApiError(res.status, message);
+    throw new ApiError(res.status, message, body?.code);
   }
   return body as T;
+}
+
+// ============ AUTH TYPES ============
+export interface User {
+  id: number;
+  username: string;
+  role: 'client' | 'collector' | 'admin';
+  company_id: number | null;
+  name?: string;
+  phone_number?: string;
+  collector_type?: 'corporate' | 'independent';
+  subscription_tier?: 'Premium' | 'Gold' | 'Silver' | null;
+}
+
+export interface AuthTokens {
+  access_token: string;
+  refresh_token: string;
+  expires_in: string;
+}
+
+export interface LoginResponse {
+  message: string;
+  user: User;
+  tokens: AuthTokens;
+  redirect_to: string;
 }
 
 // ---------- Auth ----------
@@ -108,32 +209,52 @@ export interface CollectorAuthResult {
 }
 
 export const authApi = {
-  registerClient(params: { name: string; phone_number: string; password: string; company_code?: string }) {
-    return request<{ id: number; name: string; phone_number: string; company_id: number | null; company_name: string | null; created_at: string }>(
-      '/clients/register',
-      { method: 'POST', body: JSON.stringify(params) }
+  // ✅ NEW - Unified login (works for both)
+  async login(username: string, password: string): Promise<LoginResponse> {
+    return request<LoginResponse>(
+      '/auth/login',
+      {
+        method: 'POST',
+        body: JSON.stringify({ username, password }),
+      },
+      false
     );
   },
 
+  // ✅ UPDATED - Now uses unified login
   loginClient(phone_number: string, password: string) {
-    return request<ClientAuthResult>('/auth/client/login', {
-      method: 'POST',
-      body: JSON.stringify({ phone_number, password }),
-    });
+    return this.login(phone_number, password);
+  },
+
+  // ✅ UPDATED - Now uses unified login
+  loginCollector(username: string, password: string) {
+    return this.login(username, password);
+  },
+
+  registerClient(params: { name: string; phone_number: string; password: string; company_code?: string }) {
+    return request<{ id: number; name: string; phone_number: string; company_id: number | null; company_name: string | null; created_at: string }>(
+      '/clients/register',
+      { method: 'POST', body: JSON.stringify(params) },
+      false
+    );
   },
 
   registerCollector(params: { username: string; password: string; subscription_tier?: 'Premium' | 'Gold' | 'Silver' }) {
     return request<{ id: number; username: string; collector_type: string; company_id: number | null; subscription_tier: string; created_at: string }>(
       '/collectors/register',
-      { method: 'POST', body: JSON.stringify(params) }
+      { method: 'POST', body: JSON.stringify(params) },
+      false
     );
   },
 
-  loginCollector(username: string, password: string) {
-    return request<CollectorAuthResult>('/auth/login', {
-      method: 'POST',
-      body: JSON.stringify({ username, password }),
-    });
+  // ✅ NEW - Get current user
+  async getMe(): Promise<{ user: User }> {
+    return request<{ user: User }>('/auth/me', { method: 'GET' });
+  },
+
+  // ✅ NEW - Logout
+  async logout(): Promise<{ message: string }> {
+    return request<{ message: string }>('/auth/logout', { method: 'POST' });
   },
 };
 
