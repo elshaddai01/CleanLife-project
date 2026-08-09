@@ -458,6 +458,21 @@ export const telemetryApi = {
       body: JSON.stringify({ area_id }),
     });
   },
+
+  updateLocation(latitude: number, longitude: number) {
+  return request<{
+    id: number;
+    current_latitude: number;
+    current_longitude: number;
+    location_updated_at: string;
+  }>('/telemetry/location', {
+    method: 'POST',
+    body: JSON.stringify({
+      latitude,
+      longitude,
+    }),
+  });
+},
 };
 
 export const uploadApi = {
