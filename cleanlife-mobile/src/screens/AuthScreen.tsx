@@ -1,4 +1,3 @@
-
 import React, { useState } from 'react';
 import {
   View,
@@ -25,74 +24,85 @@ export default function AuthScreen({ initialRole, onAuthenticated, onBack }: Pro
   const [mode, setMode] = useState<'login' | 'register'>('login');
 
   const [name, setName] = useState('');
+  const [email, setEmail] = useState('');
   const [phone, setPhone] = useState('');
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [companyCode, setCompanyCode] = useState('');
   const [loading, setLoading] = useState(false);
 
-  // ============================================================
-  // ✅ UPDATED handleSubmit function for unified JWT authentication
-  // ============================================================
   const handleSubmit = async () => {
-    // Validation
     if (password.length < 8) {
       Alert.alert('Invalid password', 'Password must be at least 8 characters.');
       return;
     }
-    if (role === 'client' && (!phone.trim() || (mode === 'register' && !name.trim()))) {
-      Alert.alert('Missing details', mode === 'register' ? 'Name and phone number are required.' : 'Phone number is required.');
-      return;
+
+    if (mode === 'register') {
+      if (!name.trim() || !email.trim() || !phone.trim()) {
+        Alert.alert('Missing details', 'Name, email, and phone number are required for registration.');
+        return;
+      }
+      if (!email.includes('@')) {
+        Alert.alert('Invalid email', 'Please enter a valid email address.');
+        return;
+      }
+      if (role === 'collector' && !username.trim()) {
+        Alert.alert('Missing username', 'Username is required.');
+        return;
+      }
+    } else {
+      if (role === 'client' && !phone.trim()) {
+        Alert.alert('Missing phone number', 'Phone number is required.');
+        return;
+      }
+      if (role === 'collector' && !username.trim()) {
+        Alert.alert('Missing username', 'Username is required.');
+        return;
+      }
     }
-    if (role === 'collector' && !username.trim()) {
-      Alert.alert('Missing username', 'Username is required.');
-      return;
-    }
-    
+
     setLoading(true);
     try {
       if (role === 'client') {
-        // Register client if in register mode
         if (mode === 'register') {
           await authApi.registerClient({
             name: name.trim(),
+            email: email.trim(),
             phone_number: phone.trim(),
             password,
             company_code: companyCode.trim() || undefined,
           });
         }
-        
-        // ✅ UNIFIED LOGIN - Works for clients
+
         const result = await authApi.loginClient(phone.trim(), password);
-        
-        // ✅ Store session with access token, refresh token, and user data
+
         await setSession(
-          result.tokens.access_token,    // Access token
-          'client',                      // Role
-          result.user.id,                // User ID
-          result.user,                   // User data (NEW)
-          result.tokens.refresh_token    // Refresh token (NEW)
+          result.token,
+          'client',
+          result.client.id,
+          result.client,
+          result.refreshToken
         );
         onAuthenticated('client');
       } else {
-        // Register collector if in register mode
         if (mode === 'register') {
           await authApi.registerCollector({
             username: username.trim(),
             password,
+            name: name.trim(),
+            email: email.trim(),
+            phone_number: phone.trim(),
           });
         }
-        
-        // ✅ UNIFIED LOGIN - Works for collectors
+
         const result = await authApi.loginCollector(username.trim(), password);
-        
-        // ✅ Store session with access token, refresh token, and user data
+
         await setSession(
-          result.tokens.access_token,    // Access token
-          'collector',                   // Role
-          result.user.id,                // User ID
-          result.user,                   // User data (NEW)
-          result.tokens.refresh_token    // Refresh token (NEW)
+          result.token,
+          'collector',
+          result.collector.id,
+          result.collector,
+          result.refreshToken
         );
         onAuthenticated('collector');
       }
@@ -133,26 +143,74 @@ export default function AuthScreen({ initialRole, onAuthenticated, onBack }: Pro
         {role === 'client' ? (
           <>
             {mode === 'register' && (
-              <TextInput style={styles.input} placeholder="Name" value={name} onChangeText={setName} />
+              <>
+                <TextInput style={styles.input} placeholder="Full Name" value={name} onChangeText={setName} />
+                <TextInput
+                  style={styles.input}
+                  placeholder="Email"
+                  value={email}
+                  onChangeText={setEmail}
+                  keyboardType="email-address"
+                  autoCapitalize="none"
+                />
+                <TextInput
+                  style={styles.input}
+                  placeholder="Phone number"
+                  value={phone}
+                  onChangeText={setPhone}
+                  keyboardType="phone-pad"
+                />
+                <TextInput
+                  style={styles.input}
+                  placeholder="Company code (optional)"
+                  value={companyCode}
+                  onChangeText={setCompanyCode}
+                />
+              </>
             )}
-            <TextInput
-              style={styles.input}
-              placeholder="Phone number"
-              value={phone}
-              onChangeText={setPhone}
-              keyboardType="phone-pad"
-            />
-            {mode === 'register' && (
+            {mode === 'login' && (
               <TextInput
                 style={styles.input}
-                placeholder="Company code (optional)"
-                value={companyCode}
-                onChangeText={setCompanyCode}
+                placeholder="Phone number"
+                value={phone}
+                onChangeText={setPhone}
+                keyboardType="phone-pad"
               />
             )}
           </>
         ) : (
-          <TextInput style={styles.input} placeholder="Username" value={username} onChangeText={setUsername} />
+          // Collector
+          <>
+            {mode === 'register' && (
+              <>
+                <TextInput style={styles.input} placeholder="Full Name" value={name} onChangeText={setName} />
+                <TextInput
+                  style={styles.input}
+                  placeholder="Email"
+                  value={email}
+                  onChangeText={setEmail}
+                  keyboardType="email-address"
+                  autoCapitalize="none"
+                />
+                <TextInput
+                  style={styles.input}
+                  placeholder="Phone number"
+                  value={phone}
+                  onChangeText={setPhone}
+                  keyboardType="phone-pad"
+                />
+                <TextInput
+                  style={styles.input}
+                  placeholder="Username"
+                  value={username}
+                  onChangeText={setUsername}
+                />
+              </>
+            )}
+            {mode === 'login' && (
+              <TextInput style={styles.input} placeholder="Username" value={username} onChangeText={setUsername} />
+            )}
+          </>
         )}
 
         <TextInput

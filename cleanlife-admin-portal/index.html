@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>CleanLife — Company Admin</title>
+<link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div id="login-view" class="view">
+    <div class="card login-card">
+      <h1>CleanLife Company Portal</h1>
+      <label>API base URL</label>
+      <input id="api-base" placeholder="http://192.168.1.178:4000" />
+      <label>Username</label>
+      <input id="username" placeholder="Admin username" />
+      <label>Password</label>
+      <input id="password" type="password" placeholder="Password" />
+      <button id="login-btn">Log in</button>
+      <p id="login-error" class="error hidden"></p>
+      <p class="hint">Credentials are issued by the CleanLife super admin. Contact them if you don't have a login yet.</p>
+    </div>
+  </div>
+
+  <div id="dashboard-view" class="view hidden">
+    <header>
+      <h1>CleanLife Company Portal</h1>
+      <button id="logout-btn">Log out</button>
+    </header>
+
+    <nav class="tabs">
+      <button class="tab-btn active" data-tab="collectors">Collectors & KYC</button>
+      <button class="tab-btn" data-tab="create">Create collector</button>
+    </nav>
+
+    <section id="tab-collectors" class="tab-panel">
+      <h2>Fleet collectors</h2>
+      <button id="refresh-collectors">Refresh</button>
+      <table id="collectors-table">
+        <thead>
+          <tr><th>Username</th><th>Name</th><th>Email</th><th>Phone</th><th>Type</th><th>Tier</th><th>KYC</th><th>Action</th></tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </section>
+
+    <section id="tab-create" class="tab-panel hidden">
+      <h2>Create a corporate collector</h2>
+      <p class="hint">This creates login credentials for one of your own drivers. Give them the username and password shown after creation — they log in on the CleanLife mobile app, not here.</p>
+      <div class="form-row">
+        <input id="new-username" placeholder="Username" />
+        <input id="new-password" type="password" placeholder="Password (min 8 chars)" />
+        <button id="create-collector">Create collector account</button>
+      </div>
+      <p id="create-result"></p>
+    </section>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>

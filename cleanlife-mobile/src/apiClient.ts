@@ -6,7 +6,6 @@ import type { PickupStatus, WasteType, VehicleType } from './types';
 // ============ CONFIGURATION ============
 function getApiBaseUrl() {
   const configuredUrl = process.env.EXPO_PUBLIC_API_BASE_URL?.trim();
-  console.log('DEBUG configueredUrl:', configuredUrl);
   const apiPort = process.env.EXPO_PUBLIC_API_PORT?.trim() || '3001';
 
   if (__DEV__) {
@@ -30,17 +29,17 @@ export const API_BASE = getApiBaseUrl();
 
 // ============ STORAGE KEYS ============
 const TOKEN_KEY = 'cleanlife_auth_token';
-const REFRESH_TOKEN_KEY = 'cleanlife_refresh_token';  // ✅ NEW
+const REFRESH_TOKEN_KEY = 'cleanlife_refresh_token';
 const ROLE_KEY = 'cleanlife_auth_role';
 const USER_ID_KEY = 'cleanlife_auth_user_id';
-const USER_KEY = 'cleanlife_auth_user';  // ✅ NEW
+const USER_KEY = 'cleanlife_auth_user';
 
 // ============ STORAGE HELPERS ============
 export async function getToken(): Promise<string | null> {
   return AsyncStorage.getItem(TOKEN_KEY);
 }
 
-export async function getRefreshToken(): Promise<string | null> {  // ✅ NEW
+export async function getRefreshToken(): Promise<string | null> {
   return AsyncStorage.getItem(REFRESH_TOKEN_KEY);
 }
 
@@ -53,16 +52,15 @@ export async function getStoredUserId(): Promise<number | null> {
   return raw ? Number(raw) : null;
 }
 
-export async function getStoredUser(): Promise<any | null> {  // ✅ NEW
+export async function getStoredUser(): Promise<any | null> {
   const raw = await AsyncStorage.getItem(USER_KEY);
   return raw ? JSON.parse(raw) : null;
 }
 
-// ✅ UPDATED - Now stores refresh token and user
 export async function setSession(
-  token: string, 
-  role: 'client' | 'collector', 
-  userId: number, 
+  token: string,
+  role: 'client' | 'collector',
+  userId: number,
   user?: any,
   refreshToken?: string
 ) {
@@ -77,7 +75,6 @@ export async function setSession(
   }
 }
 
-// ✅ UPDATED - Now clears refresh token and user
 export async function clearSession() {
   await AsyncStorage.multiRemove([TOKEN_KEY, REFRESH_TOKEN_KEY, ROLE_KEY, USER_ID_KEY, USER_KEY]);
 }
@@ -85,7 +82,7 @@ export async function clearSession() {
 // ============ ERROR HANDLING ============
 export class ApiError extends Error {
   status: number;
-  code?: string;  // ✅ NEW
+  code?: string;
   constructor(status: number, message: string, code?: string) {
     super(message);
     this.status = status;
@@ -95,7 +92,7 @@ export class ApiError extends Error {
 }
 
 // ============ REFRESH TOKEN ============
-async function refreshAccessToken(): Promise<string | null> {  // ✅ NEW
+async function refreshAccessToken(): Promise<string | null> {
   try {
     const refreshToken = await getRefreshToken();
     if (!refreshToken) return null;
@@ -143,14 +140,14 @@ async function request<T>(path: string, options: RequestInit = {}, requireAuth: 
   const body = isJson ? await res.json() : null;
 
   if (!res.ok) {
-    // ✅ NEW - Handle token expiration and auto-refresh
+    // Handle token expiration with a single silent retry via refresh token.
     if (res.status === 401 && body?.code === 'TOKEN_EXPIRED') {
       const newToken = await refreshAccessToken();
       if (newToken) {
         headers['Authorization'] = `Bearer ${newToken}`;
         const retryRes = await fetch(`${API_BASE}${path}`, { ...options, headers });
-        const retryBody = retryRes.headers.get('content-type')?.includes('application/json') 
-          ? await retryRes.json() 
+        const retryBody = retryRes.headers.get('content-type')?.includes('application/json')
+          ? await retryRes.json()
           : null;
         if (retryRes.ok) {
           return retryBody as T;
@@ -158,7 +155,7 @@ async function request<T>(path: string, options: RequestInit = {}, requireAuth: 
       }
       throw new ApiError(401, 'Session expired. Please login again.', 'TOKEN_EXPIRED');
     }
-    
+
     const message = (body && (body.error || body.message)) || `Request failed with status ${res.status}`;
     throw new ApiError(res.status, message, body?.code);
   }
@@ -209,29 +206,13 @@ export interface CollectorAuthResult {
 }
 
 export const authApi = {
-  // ✅ NEW - Unified login (works for both)
-  async login(username: string, password: string): Promise<LoginResponse> {
-    return request<LoginResponse>(
-      '/auth/login',
-      {
-        method: 'POST',
-        body: JSON.stringify({ username, password }),
-      },
-      false
-    );
-  },
-
-  // ✅ UPDATED - Now uses unified login
-  loginClient(phone_number: string, password: string) {
-    return this.login(phone_number, password);
-  },
-
-  // ✅ UPDATED - Now uses unified login
-  loginCollector(username: string, password: string) {
-    return this.login(username, password);
-  },
-
-  registerClient(params: { name: string; phone_number: string; password: string; company_code?: string }) {
+  registerClient(params: {
+    name: string;
+    email: string;
+    phone_number: string;
+    password: string;
+    company_code?: string
+  }) {
     return request<{ id: number; name: string; phone_number: string; company_id: number | null; company_name: string | null; created_at: string }>(
       '/clients/register',
       { method: 'POST', body: JSON.stringify(params) },
@@ -239,20 +220,70 @@ export const authApi = {
     );
   },
 
-  registerCollector(params: { username: string; password: string; subscription_tier?: 'Premium' | 'Gold' | 'Silver' }) {
-    return request<{ id: number; username: string; collector_type: string; company_id: number | null; subscription_tier: string; created_at: string }>(
+  // Unified backend login (/auth/login), reshaped to the {token, client}
+  // format the rest of the app (AuthScreen.tsx, App.tsx) expects.
+  loginClient(phone_number: string, password: string) {
+    return request<LoginResponse>(
+      '/auth/login',
+      { method: 'POST', body: JSON.stringify({ phone_number, password }) },
+      false
+    ).then((res): ClientAuthResult => ({
+      token: res.tokens.access_token,
+      client: {
+        id: res.user.id,
+        name: res.user.name || '',
+        phone_number: res.user.phone_number || '',
+        company_id: res.user.company_id,
+      },
+    }));
+  },
+
+  registerCollector(params: {
+    username: string;
+    password: string;
+    name?: string;
+    email?: string;
+    phone_number?: string;
+    subscription_tier?: 'Premium' | 'Gold' | 'Silver'
+  }) {
+    return request<{
+      id: number;
+      username: string;
+      collector_type: string;
+      company_id: number | null;
+      subscription_tier: string;
+      full_name: string | null;
+      email: string | null;
+      phone_number: string | null;
+      created_at: string
+    }>(
       '/collectors/register',
       { method: 'POST', body: JSON.stringify(params) },
       false
     );
   },
 
-  // ✅ NEW - Get current user
+  loginCollector(username: string, password: string) {
+    return request<LoginResponse>(
+      '/auth/login',
+      { method: 'POST', body: JSON.stringify({ username, password }) },
+      false
+    ).then((res): CollectorAuthResult => ({
+      token: res.tokens.access_token,
+      collector: {
+        id: res.user.id,
+        username: res.user.username,
+        collector_type: res.user.collector_type as 'corporate' | 'independent',
+        company_id: res.user.company_id,
+        subscription_tier: res.user.subscription_tier as 'Premium' | 'Gold' | 'Silver' | null,
+      },
+    }));
+  },
+
   async getMe(): Promise<{ user: User }> {
     return request<{ user: User }>('/auth/me', { method: 'GET' });
   },
 
-  // ✅ NEW - Logout
   async logout(): Promise<{ message: string }> {
     return request<{ message: string }>('/auth/logout', { method: 'POST' });
   },
@@ -435,5 +466,46 @@ export const uploadApi = {
       method: 'POST',
       body: JSON.stringify({ base64, mime_type }),
     });
+  },
+};
+
+// ---------- Profile ----------
+
+export const profileApi = {
+  getMe() {
+    return request<{ user: any }>('/auth/me');
+  },
+  updateClient(clientId: number, params: { name?: string; email?: string }) {
+    return request<{ id: number; name: string; email: string; phone_number: string; company_id: number | null }>(
+      `/clients/${clientId}/profile`,
+      { method: 'PUT', body: JSON.stringify(params) }
+    );
+  },
+  updateCollector(params: { name?: string; email?: string; phone_number?: string }) {
+    return request<{
+      id: number;
+      username: string;
+      full_name: string | null;
+      email: string | null;
+      phone_number: string | null;
+      collector_type: string;
+      subscription_tier: string | null;
+    }>('/collectors/me/profile', { method: 'PUT', body: JSON.stringify(params) });
+  },
+};
+
+// ---------- Live Location ----------
+
+export const locationApi = {
+  updateMyLocation(latitude: number, longitude: number) {
+    return request<{ id: number; last_latitude: string; last_longitude: string; last_location_at: string }>(
+      '/telemetry/location',
+      { method: 'POST', body: JSON.stringify({ latitude, longitude }) }
+    );
+  },
+  getCollectorLocation(requestId: number) {
+    return request<{ collector_id: number; last_latitude: string; last_longitude: string; last_location_at: string }>(
+      `/pickup-requests/${requestId}/collector-location`
+    );
   },
 };
