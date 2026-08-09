@@ -12,6 +12,7 @@ import ClientHomeScreen from './src/screens/client/ClientHomeScreen';
 import RequestPickupScreen from './src/screens/client/RequestPickupScreen';
 import TrackPickupScreen from './src/screens/client/TrackPickupScreen';
 import MyRequestsScreen from './src/screens/client/MyRequestsScreen';
+import ClientProfileScreen from './src/screens/client/ClientProfileScreen';
 
 import CollectorHomeScreen from './src/screens/collector/CollectorHomeScreen';
 import AvailableJobsScreen from './src/screens/collector/AvailableJobsScreen';
@@ -22,9 +23,7 @@ import WalletScreen from './src/screens/shared/WalletScreen';
 
 type Phase = 'checking' | 'splash' | 'role_select' | 'auth' | 'client_app' | 'collector_app';
 
-// Client-side screens within the client app, once logged in.
-type ClientScreen = 'home' | 'request' | 'requests' | 'track' | 'wallet';
-// Collector-side screens within the collector app, once logged in.
+type ClientScreen = 'home' | 'request' | 'requests' | 'track' | 'wallet' | 'profile';
 type CollectorScreen = 'home' | 'jobs' | 'active_job' | 'wallet' | 'profile';
 
 export default function App() {
@@ -59,8 +58,6 @@ export default function App() {
   }, []);
 
   const handleLogout = useCallback(async () => {
-    // Change screens immediately so logout never appears unresponsive while
-    // AsyncStorage is completing its disk write.
     setPhase('role_select');
     setRole('client');
     setClientScreen('home');
@@ -130,6 +127,7 @@ export default function App() {
             setTrackingId(id);
             setClientScreen('track');
           }}
+          onOpenProfile={() => setClientScreen('profile')}
           onLogout={handleLogout}
           onRecentRequest={handleRecentRequest}
         />
@@ -153,6 +151,19 @@ export default function App() {
       )}
       {phase === 'client_app' && clientScreen === 'wallet' && (
         <WalletScreen role="client" onBack={() => setClientScreen('home')} onSessionExpired={handleSessionExpired} />
+      )}
+      {phase === 'client_app' && clientScreen === 'profile' && (
+        <ClientProfileScreen onBack={() => setClientScreen('home')} onSessionExpired={handleSessionExpired} />
+      )}
+      {phase === 'client_app' && clientScreen === 'requests' && (
+        <MyRequestsScreen
+          onBack={() => setClientScreen('home')}
+          onSessionExpired={handleSessionExpired}
+          onOpenRequest={(id) => {
+            setTrackingId(id);
+            setClientScreen('track');
+          }}
+        />
       )}
 
       {/* ---------- COLLECTOR APP ---------- */}
@@ -194,16 +205,6 @@ export default function App() {
       )}
       {phase === 'collector_app' && collectorScreen === 'profile' && (
         <CollectorProfileScreen onBack={() => setCollectorScreen('home')} onSessionExpired={handleSessionExpired} />
-      )}
-      {phase === 'client_app' && clientScreen === 'requests' && (
-        <MyRequestsScreen
-          onBack={() => setClientScreen('home')}
-          onSessionExpired={handleSessionExpired}
-          onOpenRequest={(id) => {
-            setTrackingId(id);
-            setClientScreen('track');
-          }}
-        />
       )}
       </SafeAreaView>
     </SafeAreaProvider>

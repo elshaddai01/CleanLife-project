@@ -1,15 +1,13 @@
-
+// src/apiClient.ts
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { NativeModules, Platform } from 'react-native';
 import type { PickupStatus, WasteType, VehicleType } from './types';
 
+// ============ CONFIGURATION ============
 function getApiBaseUrl() {
   const configuredUrl = process.env.EXPO_PUBLIC_API_BASE_URL?.trim();
   const apiPort = process.env.EXPO_PUBLIC_API_PORT?.trim() || '3001';
 
-  // In Expo Go/development, the JS bundle is served by Metro on the same
-  // computer as the API. Reading that URL gives us the correct LAN address
-  // even when Wi-Fi/hotspot networks change.
   if (__DEV__) {
     const scriptUrl = NativeModules.SourceCode?.scriptURL as string | undefined;
     if (scriptUrl) {
@@ -18,7 +16,7 @@ function getApiBaseUrl() {
         const isLoopback = metroHost === 'localhost' || metroHost === '127.0.0.1' || metroHost === '::1';
         if (metroHost && !isLoopback) return `http://${metroHost}:${apiPort}`;
       } catch {
-        // Fall through to an explicit URL or platform-local development host.
+        // Fall through
       }
     }
   }
@@ -28,12 +26,21 @@ function getApiBaseUrl() {
 }
 
 export const API_BASE = getApiBaseUrl();
+
+// ============ STORAGE KEYS ============
 const TOKEN_KEY = 'cleanlife_auth_token';
+const REFRESH_TOKEN_KEY = 'cleanlife_refresh_token';
 const ROLE_KEY = 'cleanlife_auth_role';
 const USER_ID_KEY = 'cleanlife_auth_user_id';
+const USER_KEY = 'cleanlife_auth_user';
 
+// ============ STORAGE HELPERS ============
 export async function getToken(): Promise<string | null> {
   return AsyncStorage.getItem(TOKEN_KEY);
+}
+
+export async function getRefreshToken(): Promise<string | null> {
+  return AsyncStorage.getItem(REFRESH_TOKEN_KEY);
 }
 
 export async function getStoredRole(): Promise<'client' | 'collector' | null> {
@@ -45,31 +52,81 @@ export async function getStoredUserId(): Promise<number | null> {
   return raw ? Number(raw) : null;
 }
 
-export async function setSession(token: string, role: 'client' | 'collector', userId: number) {
+export async function getStoredUser(): Promise<any | null> {
+  const raw = await AsyncStorage.getItem(USER_KEY);
+  return raw ? JSON.parse(raw) : null;
+}
+
+export async function setSession(
+  token: string,
+  role: 'client' | 'collector',
+  userId: number,
+  user?: any,
+  refreshToken?: string
+) {
   await AsyncStorage.setItem(TOKEN_KEY, token);
   await AsyncStorage.setItem(ROLE_KEY, role);
   await AsyncStorage.setItem(USER_ID_KEY, String(userId));
-}
-
-export async function clearSession() {
-  await AsyncStorage.multiRemove([TOKEN_KEY, ROLE_KEY, USER_ID_KEY]);
-}
-
-export class ApiError extends Error {
-  status: number;
-  constructor(status: number, message: string) {
-    super(message);
-    this.status = status;
+  if (refreshToken) {
+    await AsyncStorage.setItem(REFRESH_TOKEN_KEY, refreshToken);
+  }
+  if (user) {
+    await AsyncStorage.setItem(USER_KEY, JSON.stringify(user));
   }
 }
 
-async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
+export async function clearSession() {
+  await AsyncStorage.multiRemove([TOKEN_KEY, REFRESH_TOKEN_KEY, ROLE_KEY, USER_ID_KEY, USER_KEY]);
+}
+
+// ============ ERROR HANDLING ============
+export class ApiError extends Error {
+  status: number;
+  code?: string;
+  constructor(status: number, message: string, code?: string) {
+    super(message);
+    this.status = status;
+    this.code = code;
+    this.name = 'ApiError';
+  }
+}
+
+// ============ REFRESH TOKEN ============
+async function refreshAccessToken(): Promise<string | null> {
+  try {
+    const refreshToken = await getRefreshToken();
+    if (!refreshToken) return null;
+
+    const response = await fetch(`${API_BASE}/auth/refresh`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ refresh_token: refreshToken }),
+    });
+
+    if (!response.ok) {
+      await clearSession();
+      return null;
+    }
+
+    const data = await response.json();
+    if (data.access_token) {
+      await AsyncStorage.setItem(TOKEN_KEY, data.access_token);
+      return data.access_token;
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+// ============ API REQUEST ============
+async function request<T>(path: string, options: RequestInit = {}, requireAuth: boolean = true): Promise<T> {
   const token = await getToken();
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
     ...(options.headers as Record<string, string> | undefined),
   };
-  if (token) {
+  if (requireAuth && token) {
     headers['Authorization'] = `Bearer ${token}`;
   }
 
@@ -83,10 +140,51 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   const body = isJson ? await res.json() : null;
 
   if (!res.ok) {
+    // Handle token expiration with a single silent retry via refresh token.
+    if (res.status === 401 && body?.code === 'TOKEN_EXPIRED') {
+      const newToken = await refreshAccessToken();
+      if (newToken) {
+        headers['Authorization'] = `Bearer ${newToken}`;
+        const retryRes = await fetch(`${API_BASE}${path}`, { ...options, headers });
+        const retryBody = retryRes.headers.get('content-type')?.includes('application/json')
+          ? await retryRes.json()
+          : null;
+        if (retryRes.ok) {
+          return retryBody as T;
+        }
+      }
+      throw new ApiError(401, 'Session expired. Please login again.', 'TOKEN_EXPIRED');
+    }
+
     const message = (body && (body.error || body.message)) || `Request failed with status ${res.status}`;
-    throw new ApiError(res.status, message);
+    throw new ApiError(res.status, message, body?.code);
   }
   return body as T;
+}
+
+// ============ AUTH TYPES ============
+export interface User {
+  id: number;
+  username: string;
+  role: 'client' | 'collector' | 'admin';
+  company_id: number | null;
+  name?: string;
+  phone_number?: string;
+  collector_type?: 'corporate' | 'independent';
+  subscription_tier?: 'Premium' | 'Gold' | 'Silver' | null;
+}
+
+export interface AuthTokens {
+  access_token: string;
+  refresh_token: string;
+  expires_in: string;
+}
+
+export interface LoginResponse {
+  message: string;
+  user: User;
+  tokens: AuthTokens;
+  redirect_to: string;
 }
 
 // ---------- Auth ----------
@@ -108,32 +206,86 @@ export interface CollectorAuthResult {
 }
 
 export const authApi = {
-  registerClient(params: { name: string; phone_number: string; password: string; company_code?: string }) {
+  registerClient(params: {
+    name: string;
+    email: string;
+    phone_number: string;
+    password: string;
+    company_code?: string
+  }) {
     return request<{ id: number; name: string; phone_number: string; company_id: number | null; company_name: string | null; created_at: string }>(
       '/clients/register',
-      { method: 'POST', body: JSON.stringify(params) }
+      { method: 'POST', body: JSON.stringify(params) },
+      false
     );
   },
 
+  // Unified backend login (/auth/login), reshaped to the {token, client}
+  // format the rest of the app (AuthScreen.tsx, App.tsx) expects.
   loginClient(phone_number: string, password: string) {
-    return request<ClientAuthResult>('/auth/client/login', {
-      method: 'POST',
-      body: JSON.stringify({ phone_number, password }),
-    });
+    return request<LoginResponse>(
+      '/auth/login',
+      { method: 'POST', body: JSON.stringify({ phone_number, password }) },
+      false
+    ).then((res): ClientAuthResult => ({
+      token: res.tokens.access_token,
+      client: {
+        id: res.user.id,
+        name: res.user.name || '',
+        phone_number: res.user.phone_number || '',
+        company_id: res.user.company_id,
+      },
+    }));
   },
 
-  registerCollector(params: { username: string; password: string; subscription_tier?: 'Premium' | 'Gold' | 'Silver' }) {
-    return request<{ id: number; username: string; collector_type: string; company_id: number | null; subscription_tier: string; created_at: string }>(
+  registerCollector(params: {
+    username: string;
+    password: string;
+    name?: string;
+    email?: string;
+    phone_number?: string;
+    subscription_tier?: 'Premium' | 'Gold' | 'Silver'
+  }) {
+    return request<{
+      id: number;
+      username: string;
+      collector_type: string;
+      company_id: number | null;
+      subscription_tier: string;
+      full_name: string | null;
+      email: string | null;
+      phone_number: string | null;
+      created_at: string
+    }>(
       '/collectors/register',
-      { method: 'POST', body: JSON.stringify(params) }
+      { method: 'POST', body: JSON.stringify(params) },
+      false
     );
   },
 
   loginCollector(username: string, password: string) {
-    return request<CollectorAuthResult>('/auth/login', {
-      method: 'POST',
-      body: JSON.stringify({ username, password }),
-    });
+    return request<LoginResponse>(
+      '/auth/login',
+      { method: 'POST', body: JSON.stringify({ username, password }) },
+      false
+    ).then((res): CollectorAuthResult => ({
+      token: res.tokens.access_token,
+      collector: {
+        id: res.user.id,
+        username: res.user.username,
+        collector_type: res.user.collector_type as 'corporate' | 'independent',
+        company_id: res.user.company_id,
+        subscription_tier: res.user.subscription_tier as 'Premium' | 'Gold' | 'Silver' | null,
+      },
+    }));
+  },
+
+  async getMe(): Promise<{ user: User }> {
+    return request<{ user: User }>('/auth/me', { method: 'GET' });
+  },
+
+  async logout(): Promise<{ message: string }> {
+    return request<{ message: string }>('/auth/logout', { method: 'POST' });
   },
 };
 
@@ -329,5 +481,46 @@ export const uploadApi = {
       method: 'POST',
       body: JSON.stringify({ base64, mime_type }),
     });
+  },
+};
+
+// ---------- Profile ----------
+
+export const profileApi = {
+  getMe() {
+    return request<{ user: any }>('/auth/me');
+  },
+  updateClient(clientId: number, params: { name?: string; email?: string }) {
+    return request<{ id: number; name: string; email: string; phone_number: string; company_id: number | null }>(
+      `/clients/${clientId}/profile`,
+      { method: 'PUT', body: JSON.stringify(params) }
+    );
+  },
+  updateCollector(params: { name?: string; email?: string; phone_number?: string }) {
+    return request<{
+      id: number;
+      username: string;
+      full_name: string | null;
+      email: string | null;
+      phone_number: string | null;
+      collector_type: string;
+      subscription_tier: string | null;
+    }>('/collectors/me/profile', { method: 'PUT', body: JSON.stringify(params) });
+  },
+};
+
+// ---------- Live Location ----------
+
+export const locationApi = {
+  updateMyLocation(latitude: number, longitude: number) {
+    return request<{ id: number; last_latitude: string; last_longitude: string; last_location_at: string }>(
+      '/telemetry/location',
+      { method: 'POST', body: JSON.stringify({ latitude, longitude }) }
+    );
+  },
+  getCollectorLocation(requestId: number) {
+    return request<{ collector_id: number; last_latitude: string; last_longitude: string; last_location_at: string }>(
+      `/pickup-requests/${requestId}/collector-location`
+    );
   },
 };

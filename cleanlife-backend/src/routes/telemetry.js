@@ -2,13 +2,13 @@ const express = require('express');
 const { pool, withTenant } = require('../db/pool');
 const { requireAuth } = require('../middleware/auth');
 const { handleDbError } = require('../utils/dbErrors');
+const { finiteNumber } = require('../utils/validation');
 
 const router = express.Router();
 
 // [OFF-03] Single heartbeat — collector checks into a static sector.
 // Called on app state-change or at most once per 15 minutes. NEVER call this
-// on a continuous timer shorter than 15 min or on every GPS tick — that is
-// exactly the battery/data drain pattern this design avoids.
+// on a continuous timer shorter than 15 min or on every GPS tick.
 // Body: { area_id }
 router.post('/heartbeat', requireAuth, async (req, res) => {
     const { area_id } = req.body;
@@ -38,9 +38,7 @@ router.post('/heartbeat', requireAuth, async (req, res) => {
 });
 
 // [OFF-03b] Batch heartbeat — flush a queue of check-ins recorded locally
-// while the device was offline. Only the LATEST entry (by client_timestamp)
-// is kept as current state; this is a state check-in, not an event log, so
-// intermediate offline entries are superseded rather than replayed.
+// while the device was offline.
 // Body: { entries: [{ area_id, client_timestamp }, ...] }
 router.post('/heartbeat/batch', requireAuth, async (req, res) => {
     const { entries } = req.body;
@@ -78,9 +76,36 @@ router.post('/heartbeat/batch', requireAuth, async (req, res) => {
     }
 });
 
+// [LOC-02] Live location update — foreground-only, throttled by the mobile
+// client (see ActiveJobScreen.tsx, ~20s interval, only while a job is
+// assigned). NOT a substitute for continuous background tracking — that
+// remains explicitly out of scope per SRS 5's battery/data budgets.
+// Body: { latitude, longitude }
+router.post('/location', requireAuth, async (req, res) => {
+    if (req.collector.role !== 'collector') return res.status(403).json({ error: 'collector account required' });
+
+    const latitude = finiteNumber(req.body.latitude, { min: -90, max: 90 });
+    const longitude = finiteNumber(req.body.longitude, { min: -180, max: 180 });
+    if (latitude === null || longitude === null) {
+        return res.status(400).json({ error: 'valid latitude and longitude are required' });
+    }
+
+    try {
+        const result = await pool.query(
+            'SELECT * FROM update_collector_location($1, $2, $3)',
+            [req.collector.sub, latitude, longitude]
+        );
+        if (result.rows.length === 0) {
+            return res.status(409).json({ error: 'no active assigned job — location updates only accepted while a job is in progress' });
+        }
+        return res.json(result.rows[0]);
+    } catch (err) {
+        return handleDbError(err, res, 'location update');
+    }
+});
+
 // [OFF-02] Dumpster sync feed — mobile app pulls this once (or on a manual
-// refresh) and caches it locally in SQLite/WatermelonDB, so proof-of-work
-// geofence checks and "nearest dumpster" lookups work fully offline.
+// refresh) and caches it locally in SQLite/WatermelonDB.
 router.get('/dumpsters', async (req, res) => {
     try {
         const result = await pool.query(
@@ -94,66 +119,3 @@ router.get('/dumpsters', async (req, res) => {
 });
 
 module.exports = router;
-
-// Live GPS location from the collector.
-// This is separate from the static-area heartbeat.
-router.post('/location', requireAuth, async (req, res) => {
-    const { latitude, longitude } = req.body;
-
-    if (
-        typeof latitude !== 'number' ||
-        typeof longitude !== 'number' ||
-        !Number.isFinite(latitude) ||
-        !Number.isFinite(longitude)
-    ) {
-        return res.status(400).json({
-            error: 'latitude and longitude must be valid numbers',
-        });
-    }
-
-    if (latitude < -90 || latitude > 90) {
-        return res.status(400).json({
-            error: 'invalid latitude',
-        });
-    }
-
-    if (longitude < -180 || longitude > 180) {
-        return res.status(400).json({
-            error: 'invalid longitude',
-        });
-    }
-
-    try {
-        const updated = await withTenant(req.collector.company_id, async (client) => {
-            const result = await client.query(
-                `UPDATE collectors
-                 SET current_latitude = $1,
-                     current_longitude = $2,
-                     location_updated_at = now()
-                 WHERE id = $3
-                 RETURNING
-                     id,
-                     current_latitude,
-                     current_longitude,
-                     location_updated_at`,
-                [
-                    latitude,
-                    longitude,
-                    req.collector.sub,
-                ]
-            );
-
-            return result.rows[0];
-        });
-
-        if (!updated) {
-            return res.status(404).json({
-                error: 'collector not found',
-            });
-        }
-
-        return res.json(updated);
-    } catch (err) {
-        return handleDbError(err, res, 'live location update');
-    }
-});

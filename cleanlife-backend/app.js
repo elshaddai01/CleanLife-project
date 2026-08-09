@@ -9,9 +9,11 @@ const pickupRequestsRouter = require('./src/routes/pickupRequests');
 const paymentAndProofRouter = require('./src/routes/paymentAndProof');
 const walletRouter = require('./src/routes/wallet');
 const adminRouter = require('./src/routes/admin');
+const ratingsRouter = require('./src/routes/ratings');
+const uploadsRouter = require('./src/routes/uploads');
 const { startDispatchWorker } = require('./src/queues/dispatchWorker');
 const { pool, checkDatabaseConnection } = require('./src/db/pool');
-
+const etaRouter = require('./routes/etaRoutes');
 const app = express();
 app.disable('x-powered-by');
 app.use(cors({
@@ -20,8 +22,7 @@ app.use(cors({
         return callback(new Error('origin is not allowed by CORS'));
     },
 }));
-app.use(express.json({ limit: '1mb' }));
-
+app.use(express.json({ limit: '10mb' }));
 app.use('/clients', clientsRouter);
 app.use('/collectors', collectorsRouter);
 app.use('/auth', authRouter);
@@ -30,7 +31,9 @@ app.use('/pickup-requests', pickupRequestsRouter);
 app.use('/pickup-requests', paymentAndProofRouter);
 app.use('/wallet', walletRouter);
 app.use('/admin', adminRouter);
-
+app.use('/ratings', ratingsRouter);
+app.use('/uploads', uploadsRouter);
+app.use('/eta', etaRouter);
 app.get('/health', async (req, res) => {
     try {
         const database = await checkDatabaseConnection();
@@ -39,7 +42,6 @@ app.get('/health', async (req, res) => {
         return res.status(503).json({ status: 'error', database: 'unavailable' });
     }
 });
-
 app.use((req, res) => res.status(404).json({ error: 'route not found' }));
 app.use((error, req, res, next) => {
     if (error instanceof SyntaxError && error.status === 400 && 'body' in error) {
@@ -49,18 +51,15 @@ app.use((error, req, res, next) => {
     console.error('Unhandled request error:', error);
     return res.status(500).json({ error: 'internal server error' });
 });
-
 async function startServer() {
     const database = await checkDatabaseConnection();
     if (database.database_name !== config.databaseName) {
         throw new Error(`Connected to ${database.database_name}, expected ${config.databaseName}`);
     }
-
     const dispatchWorker = startDispatchWorker();
     const server = app.listen(config.port, '0.0.0.0', () => {
         console.log(`CleanLife API listening on http://0.0.0.0:${config.port} (database: ${database.database_name})`);
     });
-
     const shutdown = (signal) => {
         console.log(`${signal} received; shutting down`);
         dispatchWorker.close();
@@ -73,12 +72,10 @@ async function startServer() {
     process.once('SIGTERM', () => shutdown('SIGTERM'));
     return server;
 }
-
 if (require.main === module) {
     startServer().catch((error) => {
         console.error('Failed to start CleanLife API:', error.message);
         process.exit(1);
     });
 }
-
 module.exports = { app, startServer };
