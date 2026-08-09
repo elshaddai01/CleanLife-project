@@ -386,3 +386,19 @@ export const profileApi = {
     }>('/collectors/me/profile', { method: 'PUT', body: JSON.stringify(params) });
   },
 };
+
+// ---------- Live Location ----------
+
+export const locationApi = {
+  updateMyLocation(latitude: number, longitude: number) {
+    return request<{ id: number; last_latitude: string; last_longitude: string; last_location_at: string }>(
+      '/telemetry/location',
+      { method: 'POST', body: JSON.stringify({ latitude, longitude }) }
+    );
+  },
+  getCollectorLocation(requestId: number) {
+    return request<{ collector_id: number; last_latitude: string; last_longitude: string; last_location_at: string }>(
+      `/pickup-requests/${requestId}/collector-location`
+    );
+  },
+};
