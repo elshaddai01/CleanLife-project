@@ -94,3 +94,66 @@ router.get('/dumpsters', async (req, res) => {
 });
 
 module.exports = router;
+
+// Live GPS location from the collector.
+// This is separate from the static-area heartbeat.
+router.post('/location', requireAuth, async (req, res) => {
+    const { latitude, longitude } = req.body;
+
+    if (
+        typeof latitude !== 'number' ||
+        typeof longitude !== 'number' ||
+        !Number.isFinite(latitude) ||
+        !Number.isFinite(longitude)
+    ) {
+        return res.status(400).json({
+            error: 'latitude and longitude must be valid numbers',
+        });
+    }
+
+    if (latitude < -90 || latitude > 90) {
+        return res.status(400).json({
+            error: 'invalid latitude',
+        });
+    }
+
+    if (longitude < -180 || longitude > 180) {
+        return res.status(400).json({
+            error: 'invalid longitude',
+        });
+    }
+
+    try {
+        const updated = await withTenant(req.collector.company_id, async (client) => {
+            const result = await client.query(
+                `UPDATE collectors
+                 SET current_latitude = $1,
+                     current_longitude = $2,
+                     location_updated_at = now()
+                 WHERE id = $3
+                 RETURNING
+                     id,
+                     current_latitude,
+                     current_longitude,
+                     location_updated_at`,
+                [
+                    latitude,
+                    longitude,
+                    req.collector.sub,
+                ]
+            );
+
+            return result.rows[0];
+        });
+
+        if (!updated) {
+            return res.status(404).json({
+                error: 'collector not found',
+            });
+        }
+
+        return res.json(updated);
+    } catch (err) {
+        return handleDbError(err, res, 'live location update');
+    }
+});

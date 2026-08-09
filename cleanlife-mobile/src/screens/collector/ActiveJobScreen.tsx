@@ -11,7 +11,8 @@ import {
 } from 'react-native';
 import * as Location from 'expo-location';
 import * as ImagePicker from 'expo-image-picker';
-import { pickupApi, uploadApi, ApiError } from '../../apiClient';
+import { pickupApi, uploadApi, ApiError, telemetryApi } from '../../apiClient';
+import { AppState } from 'react-native';
 
 type Props = {
   requestId: number;
@@ -270,3 +271,60 @@ const styles = StyleSheet.create({
   submitText: { color: '#fff', fontWeight: '800' },
   buttonDisabled: { backgroundColor: '#94a3b8' },
 });
+
+useEffect(() => {
+  let subscription: Location.LocationSubscription | null = null;
+  let mounted = true;
+
+  const startTracking = async () => {
+    try {
+      const { status } =
+        await Location.requestForegroundPermissionsAsync();
+
+      if (status !== 'granted') {
+        console.warn('Location permission not granted');
+        return;
+      }
+
+      subscription = await Location.watchPositionAsync(
+        {
+          accuracy: Location.Accuracy.Balanced,
+          timeInterval: 5000,
+          distanceInterval: 10,
+        },
+        async (location) => {
+          if (!mounted) return;
+
+          const { latitude, longitude } = location.coords;
+
+          try {
+            await telemetryApi.updateLocation(
+              latitude,
+              longitude
+            );
+          } catch (err) {
+            console.warn(
+              'Live location update failed',
+              err
+            );
+          }
+        }
+      );
+    } catch (err) {
+      console.warn(
+        'Could not start live location tracking',
+        err
+      );
+    }
+  };
+
+  void startTracking();
+
+  return () => {
+    mounted = false;
+
+    if (subscription) {
+      subscription.remove();
+    }
+  };
+}, [requestId]);
