@@ -46,7 +46,6 @@ export default function AuthScreen({ initialRole, onAuthenticated, onBack }: Pro
         Alert.alert('Invalid email', 'Please enter a valid email address.');
         return;
       }
-      // For collector registration, username is also required
       if (role === 'collector' && !username.trim()) {
         Alert.alert('Missing username', 'Username is required.');
         return;
@@ -67,29 +66,44 @@ export default function AuthScreen({ initialRole, onAuthenticated, onBack }: Pro
       if (role === 'client') {
         if (mode === 'register') {
           await authApi.registerClient({
-            name,
-            email,
-            phone_number: phone,
+            name: name.trim(),
+            email: email.trim(),
+            phone_number: phone.trim(),
             password,
-            company_code: companyCode || undefined,
+            company_code: companyCode.trim() || undefined,
           });
         }
-        const result = await authApi.loginClient(phone, password);
-        await setSession(result.token, 'client', result.client.id);
+
+        const result = await authApi.loginClient(phone.trim(), password);
+
+        await setSession(
+          result.token,
+          'client',
+          result.client.id,
+          result.client,
+          result.refreshToken
+        );
         onAuthenticated('client');
       } else {
         if (mode === 'register') {
-          // Correct mapping: username → username, name → name
           await authApi.registerCollector({
-            username,
+            username: username.trim(),
             password,
-            name,
-            email,
-            phone_number: phone,
+            name: name.trim(),
+            email: email.trim(),
+            phone_number: phone.trim(),
           });
         }
-        const result = await authApi.loginCollector(username, password);
-        await setSession(result.token, 'collector', result.collector.id);
+
+        const result = await authApi.loginCollector(username.trim(), password);
+
+        await setSession(
+          result.token,
+          'collector',
+          result.collector.id,
+          result.collector,
+          result.refreshToken
+        );
         onAuthenticated('collector');
       }
     } catch (err) {
