@@ -48,8 +48,6 @@ router.post('/', requireAuth, requireRole('client'), async (req, res) => {
 
         const initialStatus = isCorporate ? 'searching_corporate' : 'broadcast_public';
         const adminHoldExpiresAt = isCorporate ? new Date(Date.now() + require('../queues/dispatchQueue').ADMIN_HOLD_MS) : null;
-        // [PRICE-01] ASSUMPTION FLAGGED — see migration 014. Flat 500 FCFA/bag,
-        // no real pricing model exists yet.
         const estimatedPriceFcfa = bagCount * 500;
 
         const created = await withTenant(client.company_id, async (dbClient) => {
@@ -83,7 +81,6 @@ router.post('/', requireAuth, requireRole('client'), async (req, res) => {
 });
 
 // [DISP-04] Admin manual delegation within the 2-minute hold window.
-// Body: { collector_id }
 router.post('/:id/assign', requireAdminKey, async (req, res) => {
     const requestId = positiveInteger(req.params.id);
     if (!requestId) return res.status(400).json({ error: 'invalid pickup request id' });
@@ -133,8 +130,7 @@ router.post('/:id/assign', requireAdminKey, async (req, res) => {
 // [DISP-05/DISP-10] Collector claims a job. Independent collectors claim
 // broadcast_public jobs via claim_pickup_request; corporate collectors
 // claim their own company's still-open searching_corporate jobs via
-// claim_corporate_pickup_request. Branch by the authenticated collector's
-// own type — never trust a type sent in the request body.
+// claim_corporate_pickup_request.
 router.post('/:id/claim', requireAuth, requireRole('collector'), async (req, res) => {
     const requestId = positiveInteger(req.params.id);
     if (!requestId) return res.status(400).json({ error: 'invalid pickup request id' });
@@ -217,6 +213,26 @@ router.get('/:id', requireAuth, async (req, res) => {
         return res.json(result.rows[0]);
     } catch (err) {
         return handleDbError(err, res, 'pickup request status lookup');
+    }
+});
+
+// [LOC-03] Client polls their assigned collector's last known coordinates.
+// Only works while routing_status = 'assigned' — matches the window the
+// collector app is actually sending updates in.
+router.get('/:id/collector-location', requireAuth, requireRole('client'), async (req, res) => {
+    const requestId = positiveInteger(req.params.id);
+    if (!requestId) return res.status(400).json({ error: 'invalid pickup request id' });
+    try {
+        const result = await pool.query(
+            'SELECT * FROM get_collector_location_for_request($1, $2)',
+            [requestId, req.collector.sub]
+        );
+        if (result.rows.length === 0) {
+            return res.status(404).json({ error: 'no live location available for this request yet' });
+        }
+        return res.json(result.rows[0]);
+    } catch (err) {
+        return handleDbError(err, res, 'collector location lookup');
     }
 });
 
