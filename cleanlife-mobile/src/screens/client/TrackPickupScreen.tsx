@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { View, Text, Pressable, StyleSheet, ActivityIndicator } from 'react-native';
-import { pickupApi, ApiError } from '../../apiClient';
+import { pickupApi, locationApi, ApiError } from '../../apiClient';
 
 type Props = {
   requestId: number;
@@ -15,11 +15,13 @@ type Stage = {
 };
 
 const POLL_INTERVAL_MS = 5000;
+const LOCATION_POLL_INTERVAL_MS = 15000;
 
 export default function TrackPickupScreen({ requestId, onBack, onSessionExpired }: Props) {
   const [status, setStatus] = useState<Awaited<ReturnType<typeof pickupApi.getStatus>> | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [collectorLocation, setCollectorLocation] = useState<{ lat: number; lng: number; updatedAt: string } | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -42,6 +44,40 @@ export default function TrackPickupScreen({ requestId, onBack, onSessionExpired 
     const interval = setInterval(load, POLL_INTERVAL_MS);
     return () => clearInterval(interval);
   }, [load]);
+
+  // [LOC-06] Only poll for collector location while the job is actually
+  // assigned — matches the window the collector app is sending updates in.
+  useEffect(() => {
+    if (status?.routing_status !== 'assigned') {
+      setCollectorLocation(null);
+      return;
+    }
+
+    let cancelled = false;
+    async function poll() {
+      try {
+        const result = await locationApi.getCollectorLocation(requestId);
+        if (!cancelled) {
+          setCollectorLocation({
+            lat: Number(result.last_latitude),
+            lng: Number(result.last_longitude),
+            updatedAt: result.last_location_at,
+          });
+        }
+      } catch {
+        // No location yet, or collector hasn't sent one — not an error the
+        // client needs to see, the tracker screen just omits the map pin.
+        if (!cancelled) setCollectorLocation(null);
+      }
+    }
+
+    void poll();
+    const timer = setInterval(poll, LOCATION_POLL_INTERVAL_MS);
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+    };
+  }, [requestId, status?.routing_status]);
 
   const buildStages = (): Stage[] => {
     if (!status) return [];
@@ -76,6 +112,18 @@ export default function TrackPickupScreen({ requestId, onBack, onSessionExpired 
             <Text style={styles.statusBadgeText}>{status.routing_status.replace('_', ' ')}</Text>
           </View>
 
+          {collectorLocation && (
+            <View style={styles.locationCard}>
+              <Text style={styles.locationTitle}>Collector's last known location</Text>
+              <Text style={styles.locationCoords}>
+                {collectorLocation.lat.toFixed(4)}, {collectorLocation.lng.toFixed(4)}
+              </Text>
+              <Text style={styles.locationTime}>
+                Updated {new Date(collectorLocation.updatedAt).toLocaleTimeString()}
+              </Text>
+            </View>
+          )}
+
           {buildStages().map((stage) => (
             <View key={stage.key} style={styles.stageRow}>
               <View style={[styles.dot, stage.done && styles.dotDone]} />
@@ -106,9 +154,13 @@ const styles = StyleSheet.create({
     borderRadius: 20,
     paddingHorizontal: 14,
     paddingVertical: 6,
-    marginBottom: 20,
+    marginBottom: 16,
   },
   statusBadgeText: { color: '#fff', fontWeight: '800', fontSize: 13, textTransform: 'capitalize' },
+  locationCard: { backgroundColor: '#ecfdf5', borderRadius: 12, padding: 14, borderWidth: 1, borderColor: '#a7f3d0', marginBottom: 16 },
+  locationTitle: { fontSize: 12, fontWeight: '700', color: '#065f46' },
+  locationCoords: { fontSize: 15, fontWeight: '800', color: '#059669', marginTop: 4 },
+  locationTime: { fontSize: 11, color: '#64748b', marginTop: 2 },
   stageRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 14 },
   dot: { width: 14, height: 14, borderRadius: 7, backgroundColor: '#e2e8f0', marginRight: 12 },
   dotDone: { backgroundColor: '#059669' },

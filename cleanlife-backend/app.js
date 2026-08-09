@@ -10,6 +10,7 @@ const paymentAndProofRouter = require('./src/routes/paymentAndProof');
 const walletRouter = require('./src/routes/wallet');
 const adminRouter = require('./src/routes/admin');
 const ratingsRouter = require('./src/routes/ratings');
+const uploadsRouter = require('./src/routes/uploads');
 const { startDispatchWorker } = require('./src/queues/dispatchWorker');
 const { pool, checkDatabaseConnection } = require('./src/db/pool');
 
@@ -32,6 +33,8 @@ app.use('/pickup-requests', paymentAndProofRouter);
 app.use('/wallet', walletRouter);
 app.use('/admin', adminRouter);
 app.use('/ratings', ratingsRouter);
+app.use('/uploads', uploadsRouter);
+
 app.get('/health', async (req, res) => {
     try {
         const database = await checkDatabaseConnection();

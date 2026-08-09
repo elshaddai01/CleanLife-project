@@ -2,7 +2,8 @@
 const { pool, withTenant } = require('../db/pool');
 const { handleDbError } = require('../utils/dbErrors');
 const { hashPassword } = require('../utils/password');
-const { nonEmptyString } = require('../utils/validation');
+const { nonEmptyString, positiveInteger } = require('../utils/validation');
+const { requireAuth } = require('../middleware/auth');
 
 const router = express.Router();
 
@@ -12,7 +13,7 @@ const router = express.Router();
 router.post('/register', async (req, res) => {
     const name = nonEmptyString(req.body.name);
     const email = nonEmptyString(req.body.email);
-    const phone_number = nonEmptyString(req.body.phone_number);
+    const phone_number = nonEmptyString(req.body.phone_number)?.replace(/\s+/g, '') || null;
     const password = nonEmptyString(req.body.password);
     const company_code = nonEmptyString(req.body.company_code);
 
@@ -31,14 +32,16 @@ router.post('/register', async (req, res) => {
     try {
         let company = null;
 
+        // [ONBOARD-01] Company Referral Code path (with format validation)
         if (company_code) {
             const normalizedCode = String(company_code).trim().toLowerCase();
-
+            if (!/^[a-z0-9-]{3,20}$/.test(normalizedCode)) {
+                return res.status(400).json({ error: 'company_code format invalid' });
+            }
             const companyResult = await pool.query(
                 'SELECT id, company_name, subscription_tier FROM companies WHERE lower(company_code) = $1',
                 [normalizedCode]
             );
-
             if (companyResult.rows.length === 0) {
                 return res.status(400).json({
                     error: 'invalid company_code'
@@ -104,6 +107,44 @@ router.post('/register', async (req, res) => {
     }
 });
 
+
+// [PROFILE-01] Self-service profile update. Client can only update their
+// own record — validated against req.collector.sub (JWT payload) rather
+// than trusting the :id param. Uses withTenant with the client's own
+// company_id from the JWT so RLS doesn't silently no-op on corporate
+// clients (see migration 008 note on the empty-string/public trap).
+// Body: { name?, email? }
+router.put('/:id/profile', requireAuth, async (req, res) => {
+    const clientId = positiveInteger(req.params.id);
+    if (!clientId) return res.status(400).json({ error: 'invalid client id' });
+    if (req.collector.role !== 'client' || Number(req.collector.sub) !== clientId) {
+        return res.status(403).json({ error: 'you can only update your own profile' });
+    }
+
+    const name = nonEmptyString(req.body.name);
+    const email = nonEmptyString(req.body.email);
+    if (!name && !email) {
+        return res.status(400).json({ error: 'name or email is required' });
+    }
+
+    try {
+        const updated = await withTenant(req.collector.company_id, async (client) => {
+            const result = await client.query(
+                `UPDATE clients
+                 SET name = COALESCE($1, name),
+                     email = COALESCE($2, email)
+                 WHERE id = $3
+                 RETURNING id, name, email, phone_number, company_id`,
+                [name, email, clientId]
+            );
+            return result.rows[0];
+        });
+        if (!updated) return res.status(404).json({ error: 'client not found' });
+        return res.json(updated);
+    } catch (err) {
+        return handleDbError(err, res, 'profile update');
+    }
+});
 
 
 // POST /clients/verify-phone
