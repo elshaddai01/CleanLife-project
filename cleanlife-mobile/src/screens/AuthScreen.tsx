@@ -1,539 +1,550 @@
+// src/apiClient.ts
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { NativeModules, Platform } from 'react-native';
+import type { PickupStatus, WasteType, VehicleType } from './types';
 
-import React, { useState } from 'react';
-import {
-  View,
-  Text,
-  TextInput,
-  Pressable,
-  StyleSheet,
-  ScrollView,
-  ActivityIndicator,
-  Alert,
-  KeyboardAvoidingView,
-  Platform,
-} from 'react-native';
+// ============ CONFIGURATION ============
+function getApiBaseUrl() {
+  const configuredUrl = process.env.EXPO_PUBLIC_API_BASE_URL?.trim();
+  const apiPort = process.env.EXPO_PUBLIC_API_PORT?.trim() || '3001';
 
-import { authApi, setSession, ApiError } from '../apiClient';
-import VerificationScreen from './VerificationScreen';
-import PasswordResetScreen from './PasswordResetScreen';
-
-type Props = {
-  initialRole: 'client' | 'collector';
-  onAuthenticated: (role: 'client' | 'collector') => void;
-  onBack: () => void;
-};
-
-export default function AuthScreen({
-  initialRole,
-  onAuthenticated,
-  onBack,
-}: Props) {
-  const [role, setRole] = useState<'client' | 'collector'>(initialRole);
-  const [mode, setMode] = useState<'login' | 'register'>('login');
-
-  const [name, setName] = useState('');
-  const [email, setEmail] = useState('');
-  const [phone, setPhone] = useState('');
-  const [username, setUsername] = useState('');
-  const [password, setPassword] = useState('');
-  const [companyCode, setCompanyCode] = useState('');
-
-  const [loading, setLoading] = useState(false);
-
-  const [showVerification, setShowVerification] = useState(false);
-  const [showPasswordReset, setShowPasswordReset] = useState(false);
-
-  const [registeredEmail, setRegisteredEmail] = useState('');
-  const [registeredPhone, setRegisteredPhone] = useState('');
-
-  const handleSubmit = async () => {
-    if (password.length < 8) {
-      Alert.alert(
-        'Invalid password',
-        'Password must be at least 8 characters.'
-      );
-      return;
-    }
-
-    // -----------------------------
-    // VALIDATION
-    // -----------------------------
-    if (mode === 'register') {
-      if (!name.trim() || !email.trim() || !phone.trim()) {
-        Alert.alert(
-          'Missing details',
-          'Name, email, and phone number are required for registration.'
-        );
-        return;
-      }
-
-      if (!email.includes('@')) {
-        Alert.alert(
-          'Invalid email',
-          'Please enter a valid email address.'
-        );
-        return;
-      }
-
-      if (role === 'collector' && !username.trim()) {
-        Alert.alert(
-          'Missing username',
-          'Username is required.'
-        );
-        return;
-      }
-    } else {
-      if (role === 'client' && !phone.trim()) {
-        Alert.alert(
-          'Missing phone number',
-          'Phone number is required.'
-        );
-        return;
-      }
-
-      if (role === 'collector' && !username.trim()) {
-        Alert.alert(
-          'Missing username',
-          'Username is required.'
-        );
-        return;
+  if (__DEV__) {
+    const scriptUrl = NativeModules.SourceCode?.scriptURL as string | undefined;
+    if (scriptUrl) {
+      try {
+        const metroHost = new URL(scriptUrl).hostname;
+        const isLoopback = metroHost === 'localhost' || metroHost === '127.0.0.1' || metroHost === '::1';
+        if (metroHost && !isLoopback) return `http://${metroHost}:${apiPort}`;
+      } catch {
+        // Fall through
       }
     }
-
-    setLoading(true);
-
-    try {
-      // -----------------------------
-      // CLIENT
-      // -----------------------------
-      if (role === 'client') {
-        // CLIENT REGISTRATION
-        if (mode === 'register') {
-          await authApi.registerClient({
-            name: name.trim(),
-            email: email.trim(),
-            phone_number: phone.trim(),
-            password,
-            company_code: companyCode.trim() || undefined,
-          });
-
-          // Save details for verification screen
-          setRegisteredEmail(email.trim());
-          setRegisteredPhone(phone.trim());
-
-          // Open verification screen
-          setShowVerification(true);
-
-          return;
-        }
-
-        // CLIENT LOGIN
-        const result = await authApi.loginClient(
-          phone.trim(),
-          password
-        );
-
-        await setSession(
-          result.token,
-          'client',
-          result.client.id
-        );
-
-        onAuthenticated('client');
-        return;
-      }
-
-      // -----------------------------
-      // COLLECTOR
-      // -----------------------------
-
-      // COLLECTOR REGISTRATION
-      if (mode === 'register') {
-        await authApi.registerCollector({
-          username: username.trim(),
-          password,
-          name: name.trim(),
-          email: email.trim(),
-          phone_number: phone.trim(),
-        });
-      }
-
-      // COLLECTOR LOGIN
-      const result = await authApi.loginCollector(
-        username.trim(),
-        password
-      );
-
-      await setSession(
-        result.token,
-        'collector',
-        result.collector.id
-      );
-
-      onAuthenticated('collector');
-    } catch (err) {
-      const message =
-  err instanceof ApiError
-    ? 'Error ' + err.status + ': ' + err.message
-    : String(err);
-
-      Alert.alert(
-        mode === 'register'
-          ? 'Registration failed'
-          : 'Login failed',
-        message
-      );
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  // -----------------------------
-  // EMAIL + PHONE VERIFICATION
-  // -----------------------------
-  if (showVerification) {
-    return (
-      <VerificationScreen
-        email={registeredEmail}
-        phone={registeredPhone}
-        onBack={() => setShowVerification(false)}
-        onVerified={() => {
-          setShowVerification(false);
-          setMode('login');
-        }}
-      />
-    );
   }
 
-  // -----------------------------
-  // PASSWORD RESET
-  // -----------------------------
-  if (showPasswordReset) {
-    return (
-      <PasswordResetScreen
-        onBack={() => setShowPasswordReset(false)}
-        onComplete={() => {
-          setShowPasswordReset(false);
-          setMode('login');
-        }}
-      />
-    );
-  }
-
-  // -----------------------------
-  // MAIN AUTH SCREEN
-  // -----------------------------
-  return (
-    <KeyboardAvoidingView
-      style={styles.flex}
-      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-    >
-      <ScrollView
-        contentContainerStyle={styles.container}
-        keyboardShouldPersistTaps="handled"
-      >
-        <Pressable
-          style={styles.backButton}
-          onPress={onBack}
-        >
-          <Text style={styles.backText}>
-            ← Back to role selection
-          </Text>
-        </Pressable>
-
-        <Text style={styles.title}>CleanLife</Text>
-
-        <Text style={styles.subtitle}>
-          {role === 'client'
-            ? 'Client account'
-            : 'Collector account'}
-        </Text>
-
-        {/* LOGIN / REGISTER */}
-        <View style={styles.toggleRow}>
-          <Pressable
-            style={[
-              styles.toggleButton,
-              mode === 'login' &&
-                styles.toggleButtonActive,
-            ]}
-            onPress={() => setMode('login')}
-          >
-            <Text
-              style={
-                mode === 'login'
-                  ? styles.toggleTextActive
-                  : styles.toggleText
-              }
-            >
-              Log in
-            </Text>
-          </Pressable>
-
-          <Pressable
-            style={[
-              styles.toggleButton,
-              mode === 'register' &&
-                styles.toggleButtonActive,
-            ]}
-            onPress={() => setMode('register')}
-          >
-            <Text
-              style={
-                mode === 'register'
-                  ? styles.toggleTextActive
-                  : styles.toggleText
-              }
-            >
-              Register
-            </Text>
-          </Pressable>
-        </View>
-
-        {/* CLIENT */}
-        {role === 'client' && (
-          <>
-            {mode === 'register' && (
-              <>
-                <TextInput
-                  style={styles.input}
-                  placeholder="Full Name"
-                  value={name}
-                  onChangeText={setName}
-                />
-
-                <TextInput
-                  style={styles.input}
-                  placeholder="Email"
-                  value={email}
-                  onChangeText={setEmail}
-                  keyboardType="email-address"
-                  autoCapitalize="none"
-                />
-
-                <TextInput
-                  style={styles.input}
-                  placeholder="Phone number"
-                  value={phone}
-                  onChangeText={setPhone}
-                  keyboardType="phone-pad"
-                />
-
-                <TextInput
-                  style={styles.input}
-                  placeholder="Company code (optional)"
-                  value={companyCode}
-                  onChangeText={setCompanyCode}
-                  autoCapitalize="none"
-                />
-              </>
-            )}
-
-            {mode === 'login' && (
-              <TextInput
-                style={styles.input}
-                placeholder="Phone number"
-                value={phone}
-                onChangeText={setPhone}
-                keyboardType="phone-pad"
-              />
-            )}
-          </>
-        )}
-
-        {/* COLLECTOR */}
-        {role === 'collector' && (
-          <>
-            {mode === 'register' && (
-              <>
-                <TextInput
-                  style={styles.input}
-                  placeholder="Full Name"
-                  value={name}
-                  onChangeText={setName}
-                />
-
-                <TextInput
-                  style={styles.input}
-                  placeholder="Email"
-                  value={email}
-                  onChangeText={setEmail}
-                  keyboardType="email-address"
-                  autoCapitalize="none"
-                />
-
-                <TextInput
-                  style={styles.input}
-                  placeholder="Phone number"
-                  value={phone}
-                  onChangeText={setPhone}
-                  keyboardType="phone-pad"
-                />
-
-                <TextInput
-                  style={styles.input}
-                  placeholder="Username"
-                  value={username}
-                  onChangeText={setUsername}
-                  autoCapitalize="none"
-                />
-              </>
-            )}
-
-            {mode === 'login' && (
-              <TextInput
-                style={styles.input}
-                placeholder="Username"
-                value={username}
-                onChangeText={setUsername}
-                autoCapitalize="none"
-              />
-            )}
-          </>
-        )}
-
-        {/* PASSWORD */}
-        <TextInput
-          style={styles.input}
-          placeholder="Password"
-          value={password}
-          onChangeText={setPassword}
-          secureTextEntry
-        />
-
-        {/* FORGOT PASSWORD */}
-        {mode === 'login' && (
-          <Pressable
-            style={styles.forgotButton}
-            onPress={() => setShowPasswordReset(true)}
-          >
-            <Text style={styles.forgotText}>
-              Forgot password?
-            </Text>
-          </Pressable>
-        )}
-
-        {/* SUBMIT */}
-        <Pressable
-          style={styles.submitButton}
-          onPress={handleSubmit}
-          disabled={loading}
-        >
-          {loading ? (
-            <ActivityIndicator color="#fff" />
-          ) : (
-            <Text style={styles.submitText}>
-              {mode === 'register'
-                ? 'Register & log in'
-                : 'Log in'}
-            </Text>
-          )}
-        </Pressable>
-      </ScrollView>
-    </KeyboardAvoidingView>
-  );
+  if (configuredUrl) return configuredUrl.replace(/\/$/, '');
+  return Platform.OS === 'android' ? `http://10.0.2.2:${apiPort}` : `http://localhost:${apiPort}`;
 }
 
-// -----------------------------
-// STYLES
-// -----------------------------
-const styles = StyleSheet.create({
-  flex: {
-    flex: 1,
+export const API_BASE = getApiBaseUrl();
+
+// ============ STORAGE KEYS ============
+const TOKEN_KEY = 'cleanlife_auth_token';
+const REFRESH_TOKEN_KEY = 'cleanlife_refresh_token';
+const ROLE_KEY = 'cleanlife_auth_role';
+const USER_ID_KEY = 'cleanlife_auth_user_id';
+const USER_KEY = 'cleanlife_auth_user';
+
+// ============ STORAGE HELPERS ============
+export async function getToken(): Promise<string | null> {
+  return AsyncStorage.getItem(TOKEN_KEY);
+}
+
+export async function getRefreshToken(): Promise<string | null> {
+  return AsyncStorage.getItem(REFRESH_TOKEN_KEY);
+}
+
+export async function getStoredRole(): Promise<'client' | 'collector' | null> {
+  return AsyncStorage.getItem(ROLE_KEY) as Promise<'client' | 'collector' | null>;
+}
+
+export async function getStoredUserId(): Promise<number | null> {
+  const raw = await AsyncStorage.getItem(USER_ID_KEY);
+  return raw ? Number(raw) : null;
+}
+
+export async function getStoredUser(): Promise<any | null> {
+  const raw = await AsyncStorage.getItem(USER_KEY);
+  return raw ? JSON.parse(raw) : null;
+}
+
+export async function setSession(
+  token: string,
+  role: 'client' | 'collector',
+  userId: number,
+  user?: any,
+  refreshToken?: string
+) {
+  await AsyncStorage.setItem(TOKEN_KEY, token);
+  await AsyncStorage.setItem(ROLE_KEY, role);
+  await AsyncStorage.setItem(USER_ID_KEY, String(userId));
+  if (refreshToken) {
+    await AsyncStorage.setItem(REFRESH_TOKEN_KEY, refreshToken);
+  }
+  if (user) {
+    await AsyncStorage.setItem(USER_KEY, JSON.stringify(user));
+  }
+}
+
+export async function clearSession() {
+  await AsyncStorage.multiRemove([TOKEN_KEY, REFRESH_TOKEN_KEY, ROLE_KEY, USER_ID_KEY, USER_KEY]);
+}
+
+// ============ ERROR HANDLING ============
+export class ApiError extends Error {
+  status: number;
+  code?: string;
+  constructor(status: number, message: string, code?: string) {
+    super(message);
+    this.status = status;
+    this.code = code;
+    this.name = 'ApiError';
+  }
+}
+
+// ============ REFRESH TOKEN ============
+async function refreshAccessToken(): Promise<string | null> {
+  try {
+    const refreshToken = await getRefreshToken();
+    if (!refreshToken) return null;
+
+    const response = await fetch(`${API_BASE}/auth/refresh`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ refresh_token: refreshToken }),
+    });
+
+    if (!response.ok) {
+      await clearSession();
+      return null;
+    }
+
+    const data = await response.json();
+    if (data.access_token) {
+      await AsyncStorage.setItem(TOKEN_KEY, data.access_token);
+      return data.access_token;
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+// ============ API REQUEST ============
+async function request<T>(path: string, options: RequestInit = {}, requireAuth: boolean = true): Promise<T> {
+  const token = await getToken();
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+    ...(options.headers as Record<string, string> | undefined),
+  };
+  if (requireAuth && token) {
+    headers['Authorization'] = `Bearer ${token}`;
+  }
+
+  let res: Response;
+  try {
+    res = await fetch(`${API_BASE}${path}`, { ...options, headers });
+  } catch {
+    throw new ApiError(0, `Cannot reach the CleanLife server at ${API_BASE}. Check the server address and Wi-Fi connection.`);
+  }
+  const isJson = res.headers.get('content-type')?.includes('application/json');
+  const body = isJson ? await res.json() : null;
+
+  if (!res.ok) {
+    // Handle token expiration with a single silent retry via refresh token.
+    if (res.status === 401 && body?.code === 'TOKEN_EXPIRED') {
+      const newToken = await refreshAccessToken();
+      if (newToken) {
+        headers['Authorization'] = `Bearer ${newToken}`;
+        const retryRes = await fetch(`${API_BASE}${path}`, { ...options, headers });
+        const retryBody = retryRes.headers.get('content-type')?.includes('application/json')
+          ? await retryRes.json()
+          : null;
+        if (retryRes.ok) {
+          return retryBody as T;
+        }
+      }
+      throw new ApiError(401, 'Session expired. Please login again.', 'TOKEN_EXPIRED');
+    }
+
+    const message = (body && (body.error || body.message)) || `Request failed with status ${res.status}`;
+    throw new ApiError(res.status, message, body?.code);
+  }
+  return body as T;
+}
+
+// ============ AUTH TYPES ============
+export interface User {
+  id: number;
+  username: string;
+  role: 'client' | 'collector' | 'admin';
+  company_id: number | null;
+  name?: string;
+  phone_number?: string;
+  collector_type?: 'corporate' | 'independent';
+  subscription_tier?: 'Premium' | 'Gold' | 'Silver' | null;
+}
+
+export interface AuthTokens {
+  access_token: string;
+  refresh_token: string;
+  expires_in: string;
+}
+
+export interface LoginResponse {
+  message: string;
+  user: User;
+  tokens: AuthTokens;
+  redirect_to: string;
+}
+
+// ---------- Auth ----------
+
+export interface ClientAuthResult {
+  token: string;
+  refreshToken: string;
+  client: { id: number; name: string; phone_number: string; company_id: number | null };
+}
+
+export interface CollectorAuthResult {
+  token: string;
+  refreshToken: string;
+  collector: {
+    id: number;
+    username: string;
+    collector_type: 'corporate' | 'independent';
+    company_id: number | null;
+    subscription_tier: 'Premium' | 'Gold' | 'Silver' | null;
+  };
+}
+
+export const authApi = {
+  registerClient(params: {
+    name: string;
+    email: string;
+    phone_number: string;
+    password: string;
+    company_code?: string
+  }) {
+    return request<{ id: number; name: string; phone_number: string; company_id: number | null; company_name: string | null; created_at: string }>(
+      '/clients/register',
+      { method: 'POST', body: JSON.stringify(params) },
+      false
+    );
   },
 
-  container: {
-    flexGrow: 1,
-    justifyContent: 'center',
-    padding: 24,
-    backgroundColor: '#f8fafc',
+  // Unified backend login (/auth/login), reshaped to the {token, client}
+  // format the rest of the app (AuthScreen.tsx, App.tsx) expects.
+  loginClient(phone_number: string, password: string) {
+    return request<LoginResponse>(
+      '/auth/login',
+      { method: 'POST', body: JSON.stringify({ phone_number, password }) },
+      false
+    ).then((res): ClientAuthResult => ({
+      token: res.tokens.access_token,
+      refreshToken: res.tokens.refresh_token,
+      client: {
+        id: res.user.id,
+        name: res.user.name || '',
+        phone_number: res.user.phone_number || '',
+        company_id: res.user.company_id,
+      },
+    }));
   },
 
-  backButton: {
-    marginBottom: 12,
+  registerCollector(params: {
+    username: string;
+    password: string;
+    name?: string;
+    email?: string;
+    phone_number?: string;
+    subscription_tier?: 'Premium' | 'Gold' | 'Silver'
+  }) {
+    return request<{
+      id: number;
+      username: string;
+      collector_type: string;
+      company_id: number | null;
+      subscription_tier: string;
+      full_name: string | null;
+      email: string | null;
+      phone_number: string | null;
+      created_at: string
+    }>(
+      '/collectors/register',
+      { method: 'POST', body: JSON.stringify(params) },
+      false
+    );
   },
 
-  backText: {
-    color: '#059669',
-    fontWeight: '700',
-    fontSize: 14,
+  loginCollector(username: string, password: string) {
+    return request<LoginResponse>(
+      '/auth/login',
+      { method: 'POST', body: JSON.stringify({ username, password }) },
+      false
+    ).then((res): CollectorAuthResult => ({
+      token: res.tokens.access_token,
+      refreshToken: res.tokens.refresh_token,
+      collector: {
+        id: res.user.id,
+        username: res.user.username,
+        collector_type: res.user.collector_type as 'corporate' | 'independent',
+        company_id: res.user.company_id,
+        subscription_tier: res.user.subscription_tier as 'Premium' | 'Gold' | 'Silver' | null,
+      },
+    }));
   },
 
-  title: {
-    fontSize: 32,
-    fontWeight: '900',
-    color: '#065f46',
-    textAlign: 'center',
+  // ---------- Phone / Email verification, password reset ----------
+  // Matches cleanlife-backend/src/routes/clients.js — not auth-gated.
+
+  verifyPhone(phone_number: string, code: string) {
+    return request<{ message: string }>(
+      '/clients/verify-phone',
+      { method: 'POST', body: JSON.stringify({ phone_number, code }) },
+      false
+    );
   },
 
-  subtitle: {
-    fontSize: 13,
-    color: '#64748b',
-    textAlign: 'center',
-    marginBottom: 24,
+  verifyEmail(email: string, code: string) {
+    return request<{ message: string }>(
+      '/clients/verify-email',
+      { method: 'POST', body: JSON.stringify({ email, code }) },
+      false
+    );
   },
 
-  toggleRow: {
-    flexDirection: 'row',
-    marginBottom: 12,
-    backgroundColor: '#e2e8f0',
-    borderRadius: 10,
-    padding: 4,
+  requestPasswordReset(phone_number: string) {
+    return request<{ message: string; reset_code?: string }>(
+      '/clients/request-password-reset',
+      { method: 'POST', body: JSON.stringify({ phone_number }) },
+      false
+    );
   },
 
-  toggleButton: {
-    flex: 1,
-    paddingVertical: 8,
-    borderRadius: 8,
-    alignItems: 'center',
+  resetPassword(phone_number: string, code: string, new_password: string) {
+    return request<{ message: string }>(
+      '/clients/reset-password',
+      { method: 'POST', body: JSON.stringify({ phone_number, code, new_password }) },
+      false
+    );
   },
 
-  toggleButtonActive: {
-    backgroundColor: '#10b981',
+  async getMe(): Promise<{ user: User }> {
+    return request<{ user: User }>('/auth/me', { method: 'GET' });
   },
 
-  toggleText: {
-    color: '#475569',
-    fontWeight: '600',
+  async logout(): Promise<{ message: string }> {
+    return request<{ message: string }>('/auth/logout', { method: 'POST' });
+  },
+};
+
+// ---------- Pickup Requests ----------
+
+export interface BackendPickupRequest {
+  id: number;
+  client_id: number;
+  collector_id?: number | null;
+  bag_count: number;
+  waste_type: WasteType;
+  mobility_type_id: number | null;
+  routing_status: 'searching_corporate' | 'admin_hold' | 'broadcast_public' | 'assigned' | 'completed';
+  admin_hold_expires_at: string | null;
+  current_stage_rank: number;
+  payment_method: 'CASH' | 'MOMO';
+  payment_status: 'PENDING_COMPLETION' | 'COMPLETED' | 'FAILED';
+  estimated_price_fcfa: number | null;
+  collector_arrived_at?: string | null;
+  cash_collected_at?: string | null;
+  momo_requested_at?: string | null;
+  momo_confirmed_at?: string | null;
+  mobility_type?: string;
+  nearest_dumpster_id?: number | null;
+  nearest_dumpster_distance_meters?: number | null;
+  created_at: string;
+}
+
+export function deriveStatus(pr: BackendPickupRequest, hasProofOfWork: boolean): PickupStatus {
+  if (pr.routing_status === 'completed') return 'disposal_confirmed';
+  if (hasProofOfWork) return 'disposal_submitted';
+  if (pr.cash_collected_at || pr.momo_confirmed_at) return 'pickup_complete';
+  if (pr.collector_arrived_at) return 'arrived';
+  if (pr.routing_status === 'assigned') return 'on_the_way';
+  if (pr.routing_status === 'broadcast_public') return 'broadcast_public';
+  if (pr.routing_status === 'searching_corporate') return 'admin_hold';
+  return 'pending';
+}
+
+export const pickupApi = {
+  create(params: {
+    client_id: number;
+    bag_count: number;
+    waste_type: WasteType;
+    latitude: number;
+    longitude: number;
+    payment_method: 'CASH' | 'MOMO';
+  }) {
+    return request<BackendPickupRequest & { mobility_type: string; nearest_dumpster_id: number | null; nearest_dumpster_distance_meters: number | null }>(
+      '/pickup-requests',
+      { method: 'POST', body: JSON.stringify(params) }
+    );
   },
 
-  toggleTextActive: {
-    color: '#fff',
-    fontWeight: '700',
+  listAvailable() {
+    return request<BackendPickupRequest[]>('/pickup-requests/available');
   },
 
-  input: {
-    backgroundColor: '#fff',
-    borderWidth: 1,
-    borderColor: '#cbd5e1',
-    borderRadius: 10,
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-    marginBottom: 10,
-    fontSize: 15,
+  listMine() {
+    return request<BackendPickupRequest[]>('/pickup-requests/mine');
   },
 
-  forgotButton: {
-    alignItems: 'flex-end',
-    marginBottom: 8,
+  listActive() {
+    return request<BackendPickupRequest[]>('/pickup-requests/active');
   },
 
-  forgotText: {
-    color: '#059669',
-    fontWeight: '700',
+  claim(requestId: number) {
+    return request<{ id: number; routing_status: string; collector_id: number }>(
+      `/pickup-requests/${requestId}/claim`,
+      { method: 'POST' }
+    );
   },
 
-  submitButton: {
-    backgroundColor: '#059669',
-    borderRadius: 10,
-    paddingVertical: 14,
-    alignItems: 'center',
-    marginTop: 8,
+  arrive(requestId: number) {
+    return request<{ id: number; payment_method: string; collector_arrived_at: string; momo_requested_at: string | null }>(
+      `/pickup-requests/${requestId}/arrive`,
+      { method: 'POST' }
+    );
   },
 
-  submitText: {
-    color: '#fff',
-    fontWeight: '700',
-    fontSize: 16,
+  collectCash(requestId: number) {
+    return request<{ id: number; cash_collected_at: string }>(
+      `/pickup-requests/${requestId}/collect-cash`,
+      { method: 'POST' }
+    );
   },
-});
+
+  submitProofOfWork(requestId: number, params: { photo_storage_url: string; exif_latitude?: number; exif_longitude?: number; bin_code?: string }) {
+    return request<{
+      proof_of_work: { id: number; is_verified: boolean; verification_method: string; dumpster_id: number | null };
+      pickup_request: { id: number; routing_status: string; payment_status: string; estimated_price_fcfa: number };
+      wallet_credit: { id: number; new_balance: string } | null;
+    }>(`/pickup-requests/${requestId}/proof-of-work`, { method: 'POST', body: JSON.stringify(params) });
+  },
+
+  // [TRACK-01] Read-only status check — see backend migration 019.
+  getStatus(requestId: number) {
+    return request<{
+      id: number;
+      routing_status: BackendPickupRequest['routing_status'];
+      collector_id: number | null;
+      payment_method: 'CASH' | 'MOMO';
+      payment_status: BackendPickupRequest['payment_status'];
+      collector_arrived_at: string | null;
+      cash_collected_at: string | null;
+      momo_confirmed_at: string | null;
+      has_proof_of_work: boolean;
+    }>(`/pickup-requests/${requestId}`);
+  },
+};
+
+// ---------- Wallet ----------
+
+export const walletApi = {
+  getBalance() {
+    return request<{ balance: string }>('/wallet/balance');
+  },
+  getTransactions() {
+    return request<Array<{
+      id: number;
+      type: 'pickup_payment' | 'job_earnings' | 'withdraw' | 'top_up' | 'referral_bonus';
+      amount: string;
+      currency: string;
+      status: string;
+      description: string;
+      reference_pickup_request_id: number | null;
+      created_at: string;
+    }>>('/wallet/transactions');
+  },
+  topup(amount: number, description?: string) {
+    return request<{ id: number; new_balance: string }>('/wallet/topup', {
+      method: 'POST',
+      body: JSON.stringify({ amount, description }),
+    });
+  },
+  withdraw(amount: number, description?: string) {
+    return request<{ id: number; new_balance: string }>('/wallet/withdraw', {
+      method: 'POST',
+      body: JSON.stringify({ amount, description }),
+    });
+  },
+};
+
+// ---------- KYC ----------
+
+export const kycApi = {
+  submit(collectorId: number, document_url: string, document_name?: string) {
+    return request<{ id: number; kyc_status: string; kyc_submitted_at: string }>(
+      `/collectors/${collectorId}/kyc`,
+      { method: 'POST', body: JSON.stringify({ document_url, document_name }) }
+    );
+  },
+  getCollectorProfile() {
+    return request<{
+      id: number;
+      username: string;
+      collector_type: 'corporate' | 'independent';
+      subscription_tier: 'Premium' | 'Gold' | 'Silver' | null;
+      kyc_status: 'unverified' | 'pending' | 'verified' | 'rejected';
+      kyc_document_name: string | null;
+      kyc_submitted_at: string | null;
+    }>('/collectors/me');
+  },
+};
+
+export const telemetryApi = {
+  heartbeat(area_id: string) {
+    return request<{ id: number; current_area_id: string; last_heartbeat_at: string }>('/telemetry/heartbeat', {
+      method: 'POST',
+      body: JSON.stringify({ area_id }),
+    });
+  },
+};
+
+export const uploadApi = {
+  uploadProofSnapshot(base64: string, mime_type: 'image/jpeg' | 'image/png') {
+    return request<{ url: string }>('/uploads/proof', {
+      method: 'POST',
+      body: JSON.stringify({ base64, mime_type }),
+    });
+  },
+};
+
+// ---------- Profile ----------
+
+export const profileApi = {
+  getMe() {
+    return request<{ user: any }>('/auth/me');
+  },
+  updateClient(clientId: number, params: { name?: string; email?: string }) {
+    return request<{ id: number; name: string; email: string; phone_number: string; company_id: number | null }>(
+      `/clients/${clientId}/profile`,
+      { method: 'PUT', body: JSON.stringify(params) }
+    );
+  },
+  updateCollector(params: { name?: string; email?: string; phone_number?: string }) {
+    return request<{
+      id: number;
+      username: string;
+      full_name: string | null;
+      email: string | null;
+      phone_number: string | null;
+      collector_type: string;
+      subscription_tier: string | null;
+    }>('/collectors/me/profile', { method: 'PUT', body: JSON.stringify(params) });
+  },
+};
+
+// ---------- Live Location ----------
+
+export const locationApi = {
+  updateMyLocation(latitude: number, longitude: number) {
+    return request<{ id: number; last_latitude: string; last_longitude: string; last_location_at: string }>(
+      '/telemetry/location',
+      { method: 'POST', body: JSON.stringify({ latitude, longitude }) }
+    );
+  },
+  getCollectorLocation(requestId: number) {
+    return request<{ collector_id: number; last_latitude: string; last_longitude: string; last_location_at: string }>(
+      `/pickup-requests/${requestId}/collector-location`
+    );
+  },
+};
