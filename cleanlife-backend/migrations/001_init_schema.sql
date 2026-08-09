@@ -69,3 +69,31 @@ CREATE INDEX idx_pickup_requests_client_id ON pickup_requests(client_id);
 CREATE INDEX idx_pickup_requests_routing_status ON pickup_requests(routing_status);
 
 INSERT INTO mobility_types (name) VALUES ('Wheelbarrow'), ('Tricycle'), ('Van') ON CONFLICT (name) DO NOTHING;
+
+
+
+
+
+
+
+CREATE TABLE ratings (
+    id                  SERIAL PRIMARY KEY,
+    pickup_request_id   INTEGER NOT NULL
+                          REFERENCES pickup_requests(id)
+                          ON DELETE CASCADE,
+    client_id           INTEGER NOT NULL
+                          REFERENCES clients(id)
+                          ON DELETE CASCADE,
+    collector_id        INTEGER NOT NULL
+                          REFERENCES collectors(id)
+                          ON DELETE CASCADE,
+    stars               SMALLINT NOT NULL CHECK (stars BETWEEN 1 AND 5),
+    comment             TEXT,
+    created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+
+    -- one rating per pickup — this is what blocks duplicates
+    CONSTRAINT uq_rating_per_pickup UNIQUE (pickup_request_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_ratings_collector_id ON ratings(collector_id);
+CREATE INDEX IF NOT EXISTS idx_ratings_client_id ON ratings(client_id);
