@@ -9,8 +9,10 @@ const pickupRequestsRouter = require('./src/routes/pickupRequests');
 const paymentAndProofRouter = require('./src/routes/paymentAndProof');
 const walletRouter = require('./src/routes/wallet');
 const adminRouter = require('./src/routes/admin');
+const uploadsRouter = require('./src/routes/uploads'); // ✅ ADD THIS - was missing
 const { startDispatchWorker } = require('./src/queues/dispatchWorker');
 const { pool, checkDatabaseConnection } = require('./src/db/pool');
+const etaRouter = require('./routes/etaRoutes');
 
 const app = express();
 app.disable('x-powered-by');
@@ -30,6 +32,8 @@ app.use('/pickup-requests', pickupRequestsRouter);
 app.use('/pickup-requests', paymentAndProofRouter);
 app.use('/wallet', walletRouter);
 app.use('/admin', adminRouter);
+app.use('/uploads', uploadsRouter); // ✅ KEEP THIS
+app.use('/eta', etaRouter); // ✅ KEEP THIS
 
 app.get('/health', async (req, res) => {
     try {
