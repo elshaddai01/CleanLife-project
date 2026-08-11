@@ -65,8 +65,6 @@ export default function TrackPickupScreen({ requestId, onBack, onSessionExpired 
           });
         }
       } catch {
-        // No location yet, or collector hasn't sent one — not an error the
-        // client needs to see, the tracker screen just omits the map pin.
         if (!cancelled) setCollectorLocation(null);
       }
     }
