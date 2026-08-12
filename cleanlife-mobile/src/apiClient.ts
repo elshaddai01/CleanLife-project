@@ -119,6 +119,37 @@ async function refreshAccessToken(): Promise<string | null> {
   }
 }
 
+  }
+}
+
+// ============ REFRESH TOKEN ============
+async function refreshAccessToken(): Promise<string | null> {
+  try {
+    const refreshToken = await getRefreshToken();
+    if (!refreshToken) return null;
+
+    const response = await fetch(`${API_BASE}/auth/refresh`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ refresh_token: refreshToken }),
+    });
+
+    if (!response.ok) {
+      await clearSession();
+      return null;
+    }
+
+    const data = await response.json();
+    if (data.access_token) {
+      await AsyncStorage.setItem(TOKEN_KEY, data.access_token);
+      return data.access_token;
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
 // ============ API REQUEST ============
 async function request<T>(path: string, options: RequestInit = {}, requireAuth: boolean = true): Promise<T> {
   const token = await getToken();
@@ -284,6 +315,41 @@ export const authApi = {
     }));
   },
 
+  // ---------- Phone / Email verification, password reset ----------
+  // Matches cleanlife-backend/src/routes/clients.js — not auth-gated.
+
+  verifyPhone(phone_number: string, code: string) {
+    return request<{ message: string }>(
+      '/clients/verify-phone',
+      { method: 'POST', body: JSON.stringify({ phone_number, code }) },
+      false
+    );
+  },
+
+  verifyEmail(email: string, code: string) {
+    return request<{ message: string }>(
+      '/clients/verify-email',
+      { method: 'POST', body: JSON.stringify({ email, code }) },
+      false
+    );
+  },
+
+  requestPasswordReset(phone_number: string) {
+    return request<{ message: string; reset_code?: string }>(
+      '/clients/request-password-reset',
+      { method: 'POST', body: JSON.stringify({ phone_number }) },
+      false
+    );
+  },
+
+  resetPassword(phone_number: string, code: string, new_password: string) {
+    return request<{ message: string }>(
+      '/clients/reset-password',
+      { method: 'POST', body: JSON.stringify({ phone_number, code, new_password }) },
+      false
+    );
+  },
+
   async getMe(): Promise<{ user: User }> {
     return request<{ user: User }>('/auth/me', { method: 'GET' });
   },
@@ -415,101 +481,3 @@ export const walletApi = {
       currency: string;
       status: string;
       description: string;
-      reference_pickup_request_id: number | null;
-      created_at: string;
-    }>>('/wallet/transactions');
-  },
-  topup(amount: number, description?: string) {
-    return request<{ id: number; new_balance: string }>('/wallet/topup', {
-      method: 'POST',
-      body: JSON.stringify({ amount, description }),
-    });
-  },
-  withdraw(amount: number, description?: string) {
-    return request<{ id: number; new_balance: string }>('/wallet/withdraw', {
-      method: 'POST',
-      body: JSON.stringify({ amount, description }),
-    });
-  },
-};
-
-// ---------- KYC ----------
-
-export const kycApi = {
-  submit(collectorId: number, document_url: string, document_name?: string) {
-    return request<{ id: number; kyc_status: string; kyc_submitted_at: string }>(
-      `/collectors/${collectorId}/kyc`,
-      { method: 'POST', body: JSON.stringify({ document_url, document_name }) }
-    );
-  },
-  getCollectorProfile() {
-    return request<{
-      id: number;
-      username: string;
-      collector_type: 'corporate' | 'independent';
-      subscription_tier: 'Premium' | 'Gold' | 'Silver' | null;
-      kyc_status: 'unverified' | 'pending' | 'verified' | 'rejected';
-      kyc_document_name: string | null;
-      kyc_submitted_at: string | null;
-    }>('/collectors/me');
-  },
-};
-
-export const telemetryApi = {
-  heartbeat(area_id: string) {
-    return request<{ id: number; current_area_id: string; last_heartbeat_at: string }>('/telemetry/heartbeat', {
-      method: 'POST',
-      body: JSON.stringify({ area_id }),
-    });
-  },
-};
-
-export const uploadApi = {
-  uploadProofSnapshot(base64: string, mime_type: 'image/jpeg' | 'image/png') {
-    return request<{ url: string }>('/uploads/proof', {
-      method: 'POST',
-      body: JSON.stringify({ base64, mime_type }),
-    });
-  },
-};
-
-// ---------- Profile ----------
-
-export const profileApi = {
-  getMe() {
-    return request<{ user: any }>('/auth/me');
-  },
-  updateClient(clientId: number, params: { name?: string; email?: string }) {
-    return request<{ id: number; name: string; email: string; phone_number: string; company_id: number | null }>(
-      `/clients/${clientId}/profile`,
-      { method: 'PUT', body: JSON.stringify(params) }
-    );
-  },
-  updateCollector(params: { name?: string; email?: string; phone_number?: string }) {
-    return request<{
-      id: number;
-      username: string;
-      full_name: string | null;
-      email: string | null;
-      phone_number: string | null;
-      collector_type: string;
-      subscription_tier: string | null;
-    }>('/collectors/me/profile', { method: 'PUT', body: JSON.stringify(params) });
-  },
-};
-
-// ---------- Live Location ----------
-
-export const locationApi = {
-  updateMyLocation(latitude: number, longitude: number) {
-    return request<{ id: number; last_latitude: string; last_longitude: string; last_location_at: string }>(
-      '/telemetry/location',
-      { method: 'POST', body: JSON.stringify({ latitude, longitude }) }
-    );
-  },
-  getCollectorLocation(requestId: number) {
-    return request<{ collector_id: number; last_latitude: string; last_longitude: string; last_location_at: string }>(
-      `/pickup-requests/${requestId}/collector-location`
-    );
-  },
-};
