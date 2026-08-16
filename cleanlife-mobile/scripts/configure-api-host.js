@@ -28,7 +28,13 @@ if (!selected || selected.score < 0) {
   process.exit(1);
 }
 
-const apiPort = process.env.EXPO_PUBLIC_API_PORT || '3001';
+// [PORT-FIX] Was hardcoded to '3001' — that value had no relationship to
+// the backend's actual configured PORT (cleanlife-backend/.env), so this
+// script silently overwrote any manual .env.local edit back to 3001 on
+// every `npm start`. Single source of truth now: set EXPO_PUBLIC_API_PORT
+// in the shell/CI env if you need to override; otherwise this fallback
+// must match cleanlife-backend/.env's PORT value exactly.
+const apiPort = process.env.EXPO_PUBLIC_API_PORT || '5000';
 const contents = `# Generated automatically by npm start.\nEXPO_PUBLIC_API_BASE_URL=http://${selected.address}:${apiPort}\nEXPO_PUBLIC_API_PORT=${apiPort}\n`;
 fs.writeFileSync(path.resolve(__dirname, '../.env.local'), contents, 'utf8');
 console.log(`CleanLife mobile API: http://${selected.address}:${apiPort} (${selected.name})`);

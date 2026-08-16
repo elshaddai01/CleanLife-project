@@ -119,37 +119,6 @@ async function refreshAccessToken(): Promise<string | null> {
   }
 }
 
-  }
-}
-
-// ============ REFRESH TOKEN ============
-async function refreshAccessToken(): Promise<string | null> {
-  try {
-    const refreshToken = await getRefreshToken();
-    if (!refreshToken) return null;
-
-    const response = await fetch(`${API_BASE}/auth/refresh`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ refresh_token: refreshToken }),
-    });
-
-    if (!response.ok) {
-      await clearSession();
-      return null;
-    }
-
-    const data = await response.json();
-    if (data.access_token) {
-      await AsyncStorage.setItem(TOKEN_KEY, data.access_token);
-      return data.access_token;
-    }
-    return null;
-  } catch {
-    return null;
-  }
-}
-
 // ============ API REQUEST ============
 async function request<T>(path: string, options: RequestInit = {}, requireAuth: boolean = true): Promise<T> {
   const token = await getToken();
@@ -244,7 +213,7 @@ export const authApi = {
     email: string;
     phone_number: string;
     password: string;
-    company_code?: string
+    company_code?: string;
   }) {
     return request<{ id: number; name: string; phone_number: string; company_id: number | null; company_name: string | null; created_at: string }>(
       '/clients/register',
@@ -253,8 +222,6 @@ export const authApi = {
     );
   },
 
-  // Unified backend login (/auth/login), reshaped to the {token, client}
-  // format the rest of the app (AuthScreen.tsx, App.tsx) expects.
   loginClient(phone_number: string, password: string) {
     return request<LoginResponse>(
       '/auth/login',
@@ -278,7 +245,7 @@ export const authApi = {
     name?: string;
     email?: string;
     phone_number?: string;
-    subscription_tier?: 'Premium' | 'Gold' | 'Silver'
+    subscription_tier?: 'Premium' | 'Gold' | 'Silver';
   }) {
     return request<{
       id: number;
@@ -289,7 +256,7 @@ export const authApi = {
       full_name: string | null;
       email: string | null;
       phone_number: string | null;
-      created_at: string
+      created_at: string;
     }>(
       '/collectors/register',
       { method: 'POST', body: JSON.stringify(params) },
@@ -314,9 +281,6 @@ export const authApi = {
       },
     }));
   },
-
-  // ---------- Phone / Email verification, password reset ----------
-  // Matches cleanlife-backend/src/routes/clients.js — not auth-gated.
 
   verifyPhone(phone_number: string, code: string) {
     return request<{ message: string }>(
@@ -451,7 +415,6 @@ export const pickupApi = {
     }>(`/pickup-requests/${requestId}/proof-of-work`, { method: 'POST', body: JSON.stringify(params) });
   },
 
-  // [TRACK-01] Read-only status check — see backend migration 019.
   getStatus(requestId: number) {
     return request<{
       id: number;
@@ -463,6 +426,8 @@ export const pickupApi = {
       cash_collected_at: string | null;
       momo_confirmed_at: string | null;
       has_proof_of_work: boolean;
+      collector_full_name: string | null;
+      collector_phone_number: string | null;
     }>(`/pickup-requests/${requestId}`);
   },
 };
@@ -481,3 +446,128 @@ export const walletApi = {
       currency: string;
       status: string;
       description: string;
+      created_at: string;
+    }>>('/wallet/transactions');
+  },
+};
+
+// ---------- Uploads ----------
+
+export const uploadApi = {
+  uploadProofSnapshot(base64: string, mime_type: 'image/jpeg' | 'image/png') {
+    return request<{ url: string }>('/uploads/proof', {
+      method: 'POST',
+      body: JSON.stringify({ base64, mime_type }),
+    });
+  },
+};
+
+// ---------- Live Location ----------
+// [LOC-05/06] Matches cleanlife-backend/src/routes/telemetry.js (write) and
+// pickupRequests.js's GET /:id/collector-location (read), which call the
+// real SQL functions update_collector_location() and
+// get_collector_location_for_request() — see migration 031.
+
+export const locationApi = {
+  updateMyLocation(latitude: number, longitude: number) {
+    return request<{ id: number; last_latitude: string; last_longitude: string; last_location_at: string }>(
+      '/telemetry/location',
+      { method: 'POST', body: JSON.stringify({ latitude, longitude }) }
+    );
+  },
+  getCollectorLocation(requestId: number) {
+    return request<{ collector_id: number; last_latitude: string; last_longitude: string; last_location_at: string }>(
+      `/pickup-requests/${requestId}/collector-location`
+    );
+  },
+};
+
+// ---------- KYC ----------
+
+export const kycApi = {
+  submit(collectorId: number, document_url: string, document_name?: string) {
+    return request<{ id: number; kyc_status: string; kyc_submitted_at: string }>(
+      `/collectors/${collectorId}/kyc`,
+      { method: 'POST', body: JSON.stringify({ document_url, document_name }) }
+    );
+  },
+  getCollectorProfile() {
+    return request<{
+      id: number;
+      username: string;
+      collector_type: 'corporate' | 'independent';
+      subscription_tier: 'Premium' | 'Gold' | 'Silver' | null;
+      kyc_status: 'unverified' | 'pending' | 'verified' | 'rejected';
+      kyc_document_name: string | null;
+      kyc_submitted_at: string | null;
+    }>('/collectors/me');
+  },
+};
+
+// ---------- Telemetry ----------
+
+export const telemetryApi = {
+  heartbeat(area_id: string) {
+    return request<{ id: number; current_area_id: string; last_heartbeat_at: string }>('/telemetry/heartbeat', {
+      method: 'POST',
+      body: JSON.stringify({ area_id }),
+    });
+  },
+};
+
+export const etaApi = {
+  getEta(requestId: number) {
+    return request<{
+      pickup_request_id: number;
+      eta_seconds: number;
+      distance_meters: number;
+      speed_kmh: number;
+      last_eta_update: string | null;
+    }>(`/eta/${requestId}`);
+  },
+};
+
+// ---------- Profile ----------
+
+export const profileApi = {
+  getMe() {
+    return request<{ user: any }>('/auth/me');
+  },
+  updateClient(clientId: number, params: { name?: string; email?: string }) {
+    return request<{ id: number; name: string; email: string; phone_number: string; company_id: number | null }>(
+      `/clients/${clientId}/profile`,
+      { method: 'PUT', body: JSON.stringify(params) }
+    );
+  },
+  updateCollector(params: { name?: string; email?: string; phone_number?: string }) {
+    return request<{
+      id: number;
+      username: string;
+      full_name: string | null;
+      email: string | null;
+      phone_number: string | null;
+      collector_type: string;
+      subscription_tier: string | null;
+    }>('/collectors/me/profile', { method: 'PUT', body: JSON.stringify(params) });
+  },
+};
+
+// ---------- Change Password ----------
+
+export const securityApi = {
+  changePassword(currentPassword: string, newPassword: string) {
+    return request<{ message: string }>('/auth/change-password', {
+      method: 'POST',
+      body: JSON.stringify({ current_password: currentPassword, new_password: newPassword }),
+    });
+  },
+};
+
+export const notificationsApi = {
+  registerToken(pushToken: string) {
+    return request<{ registered: boolean }>('/notifications/register-token', {
+      method: 'POST',
+      body: JSON.stringify({ push_token: pushToken }),
+    });
+  },
+};
