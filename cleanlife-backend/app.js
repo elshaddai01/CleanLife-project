@@ -11,12 +11,13 @@ const pickupRequestsRouter = require('./src/routes/pickupRequests');
 const paymentAndProofRouter = require('./src/routes/paymentAndProof');
 const walletRouter = require('./src/routes/wallet');
 const adminRouter = require('./src/routes/admin');
+const payoutsRouter = require('./src/routes/payouts');
 const ratingsRouter = require('./src/routes/ratings');
 const uploadsRouter = require('./src/routes/uploads');
+const notificationsRouter = require('./src/routes/notifications');
 const { startDispatchWorker } = require('./src/queues/dispatchWorker');
 const { pool, checkDatabaseConnection } = require('./src/db/pool');
 const etaRouter = require('./src/routes/etaRoutes');
-const notificationsRouter = require('./src/routes/notifications');
 const app = express();
 app.disable('x-powered-by');
 app.use(cors({
@@ -36,10 +37,11 @@ app.use('/pickup-requests', pickupRequestsRouter);
 app.use('/pickup-requests', paymentAndProofRouter);
 app.use('/wallet', walletRouter);
 app.use('/admin', adminRouter);
+app.use('/admin/payouts', payoutsRouter);
 app.use('/ratings', ratingsRouter);
 app.use('/uploads', uploadsRouter);
-app.use('/eta', etaRouter);
 app.use('/notifications', notificationsRouter);
+app.use('/eta', etaRouter);
 app.get('/health', async (req, res) => {
     try {
         const database = await checkDatabaseConnection();

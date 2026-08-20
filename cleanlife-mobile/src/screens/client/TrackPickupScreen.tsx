@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { View, Text, Pressable, StyleSheet, ActivityIndicator, Linking } from 'react-native';
+import { View, Text, Pressable, StyleSheet, ActivityIndicator, Linking, Alert } from 'react-native';
 import { WebView } from 'react-native-webview';
 import { pickupApi, locationApi, etaApi, ApiError } from '../../apiClient';
 
@@ -26,8 +26,6 @@ const POLL_INTERVAL_MS = 5000;
 const LOCATION_POLL_INTERVAL_MS = 8000;
 const ETA_POLL_INTERVAL_MS = 15000;
 
-// [MAP-01] Fallback map center when no collector position exists yet —
-// Yaoundé city center, since the platform operates in Cameroon.
 const DEFAULT_CENTER = { lat: 3.848, lng: 11.5021 };
 
 function buildMapHtml(initialLat: number, initialLng: number) {
@@ -82,6 +80,7 @@ export default function TrackPickupScreen({ requestId, onBack, onSessionExpired 
   const [collectorLocation, setCollectorLocation] = useState<CollectorLocation | null>(null);
   const [etaSeconds, setEtaSeconds] = useState<number | null>(null);
   const [detailsExpanded, setDetailsExpanded] = useState(true);
+  const [confirmingPayment, setConfirmingPayment] = useState(false);
   const webViewRef = useRef<WebView>(null);
   const mapReadyRef = useRef(false);
 
@@ -107,7 +106,6 @@ export default function TrackPickupScreen({ requestId, onBack, onSessionExpired 
     return () => clearInterval(interval);
   }, [load]);
 
-  // [LOC-06] Poll collector's live position only while assigned.
   useEffect(() => {
     if (status?.routing_status !== 'assigned') {
       setCollectorLocation(null);
@@ -130,7 +128,6 @@ export default function TrackPickupScreen({ requestId, onBack, onSessionExpired 
         }
       } catch (err) {
         if (err instanceof ApiError && err.status === 401) onSessionExpired();
-        // 404 / transient blip — non-fatal, retry next interval.
       }
     };
 
@@ -142,9 +139,6 @@ export default function TrackPickupScreen({ requestId, onBack, onSessionExpired 
     };
   }, [status?.routing_status, requestId, onSessionExpired]);
 
-  // [ETA-04] Poll real ETA only while assigned. A 404 means location data
-  // isn't available yet (collector hasn't sent a first ping) — badge just
-  // stays hidden rather than showing a stale/fake number.
   useEffect(() => {
     if (status?.routing_status !== 'assigned') {
       setEtaSeconds(null);
@@ -158,7 +152,7 @@ export default function TrackPickupScreen({ requestId, onBack, onSessionExpired 
         const result = await etaApi.getEta(requestId);
         if (!cancelled) setEtaSeconds(result.eta_seconds);
       } catch {
-        // Non-fatal — no ETA yet, badge stays hidden until data exists.
+        // No ETA yet — badge stays hidden.
       }
     };
 
@@ -177,6 +171,20 @@ export default function TrackPickupScreen({ requestId, onBack, onSessionExpired 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  const handleValidatePayment = async () => {
+    setConfirmingPayment(true);
+    try {
+      await pickupApi.confirmPayment(requestId);
+      await load();
+      Alert.alert('Payment confirmed', 'Your collector has been notified and can now proceed.');
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 401) return onSessionExpired();
+      Alert.alert('Could not confirm payment', err instanceof ApiError ? err.message : String(err));
+    } finally {
+      setConfirmingPayment(false);
+    }
+  };
+
   const buildStages = (): Stage[] => {
     if (!status) return [];
     const arrived = !!status.collector_arrived_at;
@@ -192,7 +200,7 @@ export default function TrackPickupScreen({ requestId, onBack, onSessionExpired 
       { key: 'posted', label: 'Job Posted', state: 'done' },
       { key: 'accepted', label: 'Collector accepted', state: stageOf(assigned, !assigned) },
       { key: 'on_the_way', label: 'Collector on the way', state: stageOf(arrived, assigned && !arrived) },
-      { key: 'pickup_complete', label: 'Pickup complete', state: stageOf(paymentDone, arrived && !paymentDone) },
+      { key: 'payment', label: 'Payment confirmed', state: stageOf(paymentDone, arrived && !paymentDone) },
       { key: 'disposal_confirmed', label: 'Disposal confirmed', state: stageOf(completed, disposed && !completed) },
     ];
   };
@@ -201,13 +209,19 @@ export default function TrackPickupScreen({ requestId, onBack, onSessionExpired 
     if (!status) return '';
     if (status.routing_status === 'completed') return 'Completed';
     if (status.has_proof_of_work) return 'Disposal submitted';
-    if (status.cash_collected_at || status.momo_confirmed_at) return 'Pickup complete';
+    if (status.cash_collected_at || status.momo_confirmed_at) return 'Payment confirmed — collector proceeding';
+    if (status.collector_arrived_at && status.payment_method === 'MOMO') return 'Awaiting your payment confirmation';
     if (status.collector_arrived_at) return 'Collector arrived';
     if (status.routing_status === 'assigned') return 'Collector on the way';
     return 'Finding a collector';
   })();
 
   const showMap = status?.routing_status === 'assigned';
+  const needsPaymentValidation =
+    status?.routing_status === 'assigned' &&
+    status?.payment_method === 'MOMO' &&
+    !!status?.collector_arrived_at &&
+    !status?.momo_confirmed_at;
 
   if (loading || !status) {
     return (
@@ -267,6 +281,25 @@ export default function TrackPickupScreen({ requestId, onBack, onSessionExpired 
                 <Text style={styles.collectorPhoneMissing}>Phone number not on file</Text>
               )}
             </View>
+          </View>
+        )}
+
+        {needsPaymentValidation && (
+          <View style={styles.paymentPrompt}>
+            <Text style={styles.paymentPromptText}>
+              Your collector has arrived. Confirm your MoMo payment to let them proceed.
+            </Text>
+            <Pressable
+              style={styles.validateButton}
+              onPress={handleValidatePayment}
+              disabled={confirmingPayment}
+            >
+              {confirmingPayment ? (
+                <ActivityIndicator color="#fff" />
+              ) : (
+                <Text style={styles.validateButtonText}>Validate Payment (Demo)</Text>
+              )}
+            </Pressable>
           </View>
         )}
 
@@ -344,7 +377,7 @@ const styles = StyleSheet.create({
   requestId: { color: '#475569', fontWeight: '700', fontSize: 14 },
   etaBadge: { backgroundColor: '#dbeafe', borderRadius: 14, paddingHorizontal: 12, paddingVertical: 5 },
   etaBadgeText: { color: '#1d4ed8', fontWeight: '800', fontSize: 13 },
-  statusTitle: { fontSize: 20, fontWeight: '900', color: '#1e293b', marginTop: 6, marginBottom: 14 },
+  statusTitle: { fontSize: 18, fontWeight: '900', color: '#1e293b', marginTop: 6, marginBottom: 14 },
   collectorRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 14 },
   avatar: {
     width: 40,
@@ -359,6 +392,15 @@ const styles = StyleSheet.create({
   collectorName: { fontSize: 16, fontWeight: '800', color: '#1e293b' },
   collectorPhone: { fontSize: 13, color: '#0891b2', fontWeight: '700', marginTop: 2 },
   collectorPhoneMissing: { fontSize: 12, color: '#94a3b8', fontStyle: 'italic', marginTop: 2 },
+  paymentPrompt: {
+    backgroundColor: '#fef3c7',
+    borderRadius: 12,
+    padding: 14,
+    marginBottom: 14,
+  },
+  paymentPromptText: { fontSize: 13, color: '#92400e', fontWeight: '600', marginBottom: 10 },
+  validateButton: { backgroundColor: '#d97706', borderRadius: 10, paddingVertical: 12, alignItems: 'center' },
+  validateButtonText: { color: '#fff', fontWeight: '800', fontSize: 14 },
   detailsButton: {
     borderWidth: 1.5,
     borderColor: '#059669',

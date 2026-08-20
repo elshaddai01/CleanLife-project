@@ -9,11 +9,6 @@ const { sendPushNotification } = require('../utils/pushService');
 
 const router = express.Router();
 
-// [PAY-02] Collector marks arrival at the client's location. For MoMo, this
-// is the ONLY moment the Request-to-Pay push goes out (SRS: never before
-// physical arrival — protects the client from a premature charge prompt).
-// NOTE: no real MTN/Orange MoMo integration exists — this logs/simulates
-// the push. Swap logMomoPush() for a real provider call when integrating.
 router.post('/:id/arrive', requireAuth, requireRole('collector'), async (req, res) => {
     const requestId = positiveInteger(req.params.id);
     if (!requestId) return res.status(400).json({ error: 'invalid pickup request id' });
@@ -27,23 +22,22 @@ router.post('/:id/arrive', requireAuth, requireRole('collector'), async (req, re
         }
         const row = result.rows[0];
 
-        // [NOTIF-05] Real push — notify the client their collector has arrived.
-    const clientLookup = await pool.query(
-        'SELECT push_token FROM clients WHERE id = (SELECT client_id FROM pickup_requests WHERE id = $1)',
-        [requestId]
-    );
-    if (clientLookup.rows[0]?.push_token) {
-        void sendPushNotification(
-            clientLookup.rows[0].push_token,
-            'Your collector has arrived',
-            'They are at your pickup location now.',
-            { pickup_request_id: requestId }
-        );
-    }
-
         if (row.payment_method === 'MOMO') {
-            // SIMULATED — replace with a real MTN/Orange Request-to-Pay API call.
             console.log(`[momo] SIMULATED Request-to-Pay push sent for request ${requestId}`);
+        }
+
+        // [NOTIF-05] Real push — notify the client their collector has arrived.
+        const clientLookup = await pool.query(
+            'SELECT push_token FROM clients WHERE id = (SELECT client_id FROM pickup_requests WHERE id = $1)',
+            [requestId]
+        );
+        if (clientLookup.rows[0]?.push_token) {
+            void sendPushNotification(
+                clientLookup.rows[0].push_token,
+                'Your collector has arrived',
+                'They are at your pickup location now.',
+                { pickup_request_id: requestId }
+            );
         }
 
         return res.json(row);
@@ -52,7 +46,6 @@ router.post('/:id/arrive', requireAuth, requireRole('collector'), async (req, re
     }
 });
 
-// [PAY-03] Cash handoff confirmation — collector-initiated, on-site.
 router.post('/:id/collect-cash', requireAuth, requireRole('collector'), async (req, res) => {
     const requestId = positiveInteger(req.params.id);
     if (!requestId) return res.status(400).json({ error: 'invalid pickup request id' });
@@ -64,7 +57,6 @@ router.post('/:id/collect-cash', requireAuth, requireRole('collector'), async (r
         if (result.rows.length === 0) {
             return res.status(409).json({ error: 'request not found, not yours, or not a CASH payment' });
         }
-        // Real system: fire the commission-processing webhook here.
         console.log(`[payment] SIMULATED commission webhook fired for cash request ${requestId}`);
         return res.json(result.rows[0]);
     } catch (err) {
@@ -72,11 +64,6 @@ router.post('/:id/collect-cash', requireAuth, requireRole('collector'), async (r
     }
 });
 
-// [PAY-04] SIMULATED provider webhook — stands in for MTN/Orange calling
-// back once the client approves the Request-to-Pay prompt on their phone.
-// Gated by a shared secret since this would be a public-facing endpoint in
-// a real deployment; a real integration would verify the provider's own
-// signature scheme instead of a static header.
 router.post('/momo/webhook', async (req, res) => {
     const secret = req.headers['x-momo-webhook-secret'];
     if (!secret || secret !== config.momoWebhookSecret) {
@@ -99,8 +86,11 @@ router.post('/momo/webhook', async (req, res) => {
 
 // [POW-06] Proof-of-work submission — the ONLY action that completes a
 // request and releases escrow (SRS 3.4), regardless of payment method.
+// [FLOW-03] As of migration 035, insert_proof_of_work now ALSO requires
+// payment to already be confirmed (cash_collected_at or momo_confirmed_at)
+// — enforced in the database, so a request with unconfirmed MoMo payment
+// will be rejected here with a 409, same as any other ownership failure.
 // Body: { photo_storage_url, exif_latitude?, exif_longitude?, bin_code? }
-// Either bin_code OR both exif_latitude/exif_longitude must be given.
 router.post('/:id/proof-of-work', requireAuth, requireRole('collector'), async (req, res) => {
     const requestId = positiveInteger(req.params.id);
     if (!requestId) return res.status(400).json({ error: 'invalid pickup request id' });
@@ -134,7 +124,7 @@ router.post('/:id/proof-of-work', requireAuth, requireRole('collector'), async (
                 proofParams
             );
             if (inserted.rows.length === 0) {
-                return res.status(409).json({ error: 'request not found, not yours, or not currently assigned' });
+                return res.status(409).json({ error: 'request not found, not yours, not currently assigned, or payment not yet confirmed' });
             }
             return res.status(422).json({
                 error: bin_code
@@ -154,7 +144,7 @@ router.post('/:id/proof-of-work', requireAuth, requireRole('collector'), async (
 
             if (inserted.rows.length === 0) {
                 await client.query('ROLLBACK');
-                return res.status(409).json({ error: 'request not found, not yours, or not currently assigned' });
+                return res.status(409).json({ error: 'request not found, not yours, not currently assigned, or payment not yet confirmed' });
             }
 
             const completed = await client.query(
@@ -163,15 +153,17 @@ router.post('/:id/proof-of-work', requireAuth, requireRole('collector'), async (
             );
             if (completed.rows.length === 0) throw new Error('pickup request could not be completed');
 
-        // [WALLET-05] Escrow release IS the earnings event — credit the
-        // collector's wallet in the same step, not a separate one, so a
-        // "completed" job can never exist without a matching payout record.
+            // [PAYOUT-04] process_escrow_release decides where the money
+            // goes: the collector's COMPANY wallet if corporate, or the
+            // collector directly if independent (existing behavior,
+            // unchanged for that case). Replaces the old direct
+            // create_wallet_transaction call.
             let walletCredit = null;
             const price = completed.rows[0].estimated_price_fcfa;
             if (price && Number(price) > 0) {
                 const creditResult = await client.query(
-                    'SELECT * FROM create_wallet_transaction($1, $2, $3, $4, $5, $6)',
-                    ['collector', req.collector.sub, 'job_earnings', price, `Job earnings for pickup request ${requestId}`, requestId]
+                    'SELECT * FROM process_escrow_release($1, $2, $3)',
+                    [req.collector.sub, price, requestId]
                 );
                 walletCredit = creditResult.rows[0];
             }
