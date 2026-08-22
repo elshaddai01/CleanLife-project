@@ -5,6 +5,7 @@ const { positiveInteger, finiteNumber } = require('../utils/validation');
 const { handleDbError } = require('../utils/dbErrors');
 const { evaluateMobility } = require('../services/mobilityEvaluation');
 const { scheduleAdminHoldExpiry, scheduleCascade, cancelPendingJobs } = require('../queues/dispatchQueue');
+const { sendPushNotification } = require('../utils/pushService');
 
 const router = express.Router();
 
@@ -144,6 +145,20 @@ router.post('/:id/claim', requireAuth, requireRole('collector'), async (req, res
             return res.status(409).json({ error: 'request already claimed, not available to you, or does not exist' });
         }
         await cancelPendingJobs(requestId);
+        // [NOTIF-04] Real push — notify the client their request was claimed.
+    // Fire-and-forget: a push failure must never break the claim itself.
+    const clientLookup = await pool.query(
+        'SELECT push_token FROM clients WHERE id = (SELECT client_id FROM pickup_requests WHERE id = $1)',
+        [requestId]
+    );
+    if (clientLookup.rows[0]?.push_token) {
+        void sendPushNotification(
+            clientLookup.rows[0].push_token,
+            'Collector on the way!',
+            'A collector has accepted your pickup request.',
+            { pickup_request_id: requestId }
+        );
+    }
         return res.json(result.rows[0]);
     } catch (err) {
         return handleDbError(err, res, 'claim request');

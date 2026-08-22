@@ -229,4 +229,43 @@ router.get('/me', requireAuth, async (req, res) => {
     }
 });
 
+// [SEC-01] Add this route to cleanlife-backend/src/routes/auth.js,
+// placed after the GET /me route and before module.exports.
+// Works for both clients and collectors — role comes from the JWT.
+router.post('/change-password', requireAuth, async (req, res) => {
+    const { comparePassword, hashPassword } = require('../utils/password');
+    const { nonEmptyString } = require('../utils/validation');
+    const currentPassword = nonEmptyString(req.body.current_password);
+    const newPassword = nonEmptyString(req.body.new_password);
+
+    if (!currentPassword || !newPassword) {
+        return res.status(400).json({ error: 'current_password and new_password are required' });
+    }
+    if (newPassword.length < 8) {
+        return res.status(400).json({ error: 'new password must be at least 8 characters' });
+    }
+
+    const user = req.collector;
+    const table = user.role === 'client' ? 'clients' : 'collectors';
+
+    try {
+        const existing = await pool.query(`SELECT password_hash FROM ${table} WHERE id = $1`, [user.sub]);
+        if (existing.rows.length === 0) {
+            return res.status(404).json({ error: 'account not found' });
+        }
+        const passwordOk = await comparePassword(currentPassword, existing.rows[0].password_hash);
+        if (!passwordOk) {
+            return res.status(401).json({ error: 'current password is incorrect' });
+        }
+
+        const newHash = await hashPassword(newPassword);
+        await pool.query(`UPDATE ${table} SET password_hash = $1 WHERE id = $2`, [newHash, user.sub]);
+
+        return res.json({ message: 'password changed successfully' });
+    } catch (error) {
+        console.error('Change password error:', error);
+        return res.status(500).json({ error: 'password change failed' });
+    }
+});
+
 module.exports = router;

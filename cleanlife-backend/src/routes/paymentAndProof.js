@@ -5,6 +5,7 @@ const { positiveInteger, finiteNumber } = require('../utils/validation');
 const config = require('../config/env');
 const { handleDbError } = require('../utils/dbErrors');
 const { verifyDisposal } = require('../services/proofOfWorkVerification');
+const { sendPushNotification } = require('../utils/pushService');
 
 const router = express.Router();
 
@@ -25,6 +26,20 @@ router.post('/:id/arrive', requireAuth, requireRole('collector'), async (req, re
             return res.status(409).json({ error: 'request not found, not yours, or not currently assigned' });
         }
         const row = result.rows[0];
+
+        // [NOTIF-05] Real push — notify the client their collector has arrived.
+    const clientLookup = await pool.query(
+        'SELECT push_token FROM clients WHERE id = (SELECT client_id FROM pickup_requests WHERE id = $1)',
+        [requestId]
+    );
+    if (clientLookup.rows[0]?.push_token) {
+        void sendPushNotification(
+            clientLookup.rows[0].push_token,
+            'Your collector has arrived',
+            'They are at your pickup location now.',
+            { pickup_request_id: requestId }
+        );
+    }
 
         if (row.payment_method === 'MOMO') {
             // SIMULATED — replace with a real MTN/Orange Request-to-Pay API call.

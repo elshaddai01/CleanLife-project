@@ -1,26 +1,29 @@
 import React from 'react';
 import { View, Text, Pressable, StyleSheet } from 'react-native';
+import { useLanguage } from '../i18n/LanguageContext';
 
 type Props = {
   onSelectRole: (role: 'client' | 'collector') => void;
 };
 
 export default function RoleSelectionScreen({ onSelectRole }: Props) {
+  const { t } = useLanguage();
+
   return (
     <View style={styles.container}>
-      <Text style={styles.title}>Welcome to CleanLife</Text>
-      <Text style={styles.subtitle}>How would you like to continue?</Text>
+      <Text style={styles.title}>{t('role_select_title')}</Text>
+      <Text style={styles.subtitle}>{t('role_select_subtitle')}</Text>
 
       <Pressable style={styles.card} onPress={() => onSelectRole('client')}>
         <Text style={styles.cardEmoji}>🏠</Text>
-        <Text style={styles.cardTitle}>I need a pickup</Text>
-        <Text style={styles.cardText}>Request waste collection for your home or business.</Text>
+        <Text style={styles.cardTitle}>{t('role_select_client_title')}</Text>
+        <Text style={styles.cardText}>{t('role_select_client_text')}</Text>
       </Pressable>
 
       <Pressable style={[styles.card, styles.cardCollector]} onPress={() => onSelectRole('collector')}>
         <Text style={styles.cardEmoji}>🚲</Text>
-        <Text style={styles.cardTitle}>I collect waste</Text>
-        <Text style={styles.cardText}>Find nearby jobs and get paid for pickups.</Text>
+        <Text style={styles.cardTitle}>{t('role_select_collector_title')}</Text>
+        <Text style={styles.cardText}>{t('role_select_collector_text')}</Text>
       </Pressable>
     </View>
   );
