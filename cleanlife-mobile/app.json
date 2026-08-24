@@ -1,0 +1,30 @@
+{
+  "expo": {
+    "name": "cleanlife-mobile",
+    "slug": "cleanlife-mobile",
+    "version": "1.0.0",
+    "orientation": "portrait",
+   
+    "userInterfaceStyle": "light",
+    "ios": {
+      "supportsTablet": true
+    },
+    "android": {
+      "predictiveBackGestureEnabled": false
+    },
+    "plugins": [
+      [
+        "expo-image-picker",
+        {
+          "cameraPermission": "Allow CleanLife to take disposal proof photos.",
+          "photosPermission": false,
+          "microphonePermission": false
+        }
+      ]
+    ],
+    "web": {
+      "favicon": "./assets/favicon.png"
+    }
+  }
+}
+

@@ -2,8 +2,9 @@
 // Never leaks raw SQL/stack traces to the client.
 function handleDbError(err, res, context = 'operation') {
     if (err.code === '23505') {
-        // unique_violation
-        return res.status(409).json({ error: 'a record with that value already exists' });
+        // unique_violation – extract the field name from the detail message for a better error
+        const field = err.detail?.match(/Key \(([^)]+)\)/)?.[1] || 'value';
+        return res.status(409).json({ error: `a record with that ${field} already exists` });
     }
     if (err.code === '42501') {
         // insufficient_privilege — includes RLS policy violations.

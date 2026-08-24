@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>CleanLife — Super Admin</title>
+<link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div id="login-view" class="view">
+    <div class="card login-card">
+      <h1>CleanLife Super Admin</h1>
+      <label>API base URL</label>
+      <input id="api-base" placeholder="http://192.168.1.178:4000" />
+      <label>Username</label>
+      <input id="username" placeholder="superadmin" />
+      <label>Password</label>
+      <input id="password" type="password" placeholder="Password" />
+      <button id="login-btn">Log in</button>
+      <p id="login-error" class="error hidden"></p>
+    </div>
+  </div>
+
+  <div id="dashboard-view" class="view hidden">
+    <header>
+      <h1>CleanLife Super Admin</h1>
+      <button id="logout-btn">Log out</button>
+    </header>
+
+    <nav class="tabs">
+      <button class="tab-btn active" data-tab="overview">Overview</button>
+      <button class="tab-btn" data-tab="companies">Companies</button>
+    </nav>
+
+    <section id="tab-overview" class="tab-panel">
+      <h2>Platform overview</h2>
+      <div class="stats-row" id="stats-row"></div>
+    </section>
+
+    <section id="tab-companies" class="tab-panel hidden">
+      <h2>Companies</h2>
+      <div class="form-row">
+        <input id="co-name" placeholder="Company name" />
+        <input id="co-code" placeholder="Company code" />
+        <select id="co-tier">
+          <option>Premium</option>
+          <option>Gold</option>
+          <option>Silver</option>
+        </select>
+        <button id="add-company">Add company</button>
+      </div>
+      <button id="refresh-companies">Refresh</button>
+      <table id="companies-table">
+        <thead><tr><th>ID</th><th>Name</th><th>Code</th><th>Tier</th><th>Give portal access</th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </section>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>

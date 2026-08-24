@@ -3,7 +3,7 @@ const { pool, withTenant } = require('../db/pool');
 const { hashPassword } = require('../utils/password');
 const { requireAdminKey, requireAuth } = require('../middleware/auth');
 const { handleDbError } = require('../utils/dbErrors');
-const { positiveInteger, nonEmptyString } = require('../utils/validation');
+const { positiveInteger, nonEmptyString, finiteNumber } = require('../utils/validation');
 
 const router = express.Router();
 
@@ -15,6 +15,74 @@ router.get('/me', requireAuth, async (req, res) => {
         return res.json(result.rows[0]);
     } catch (err) {
         return handleDbError(err, res, 'collector profile lookup');
+    }
+});
+
+// [LOC-05] Foreground-only GPS ping — collector-only, self-scoped.
+// ASSUMPTION FLAGGED: assumes update_collector_location(collector_id,
+// latitude, longitude) already exists (per earlier migration) and returns
+// the updated row. Adjust param/column names here if the real signature
+// differs.
+// Body: { latitude, longitude }
+router.post('/me/location', requireAuth, async (req, res) => {
+    if (req.collector.role !== 'collector') return res.status(403).json({ error: 'collector account required' });
+
+    const latitude = finiteNumber(req.body.latitude, { min: -90, max: 90 });
+    const longitude = finiteNumber(req.body.longitude, { min: -180, max: 180 });
+    if (latitude === null || longitude === null) {
+        return res.status(400).json({ error: 'valid latitude and longitude are required' });
+    }
+
+    try {
+        const result = await pool.query(
+            'SELECT * FROM update_collector_location($1, $2, $3)',
+            [req.collector.sub, latitude, longitude]
+        );
+        if (result.rows.length === 0) {
+            return res.status(404).json({ error: 'collector not found' });
+        }
+        return res.json(result.rows[0]);
+    } catch (err) {
+        return handleDbError(err, res, 'collector location update');
+    }
+});
+
+// [PROFILE-01] Add this route to cleanlife-backend/src/routes/collectors.js,
+// placed after the existing POST /me/location route and before /register.
+// Matches profileApi.updateCollector() call in apiClient.ts — that route
+// never existed, causing "route not found" once profileApi itself is
+// correctly imported. Self-scoped write: a collector can only update
+// their own row, same pattern as every other self-scoped route here.
+// Body: { name?, email?, phone_number? }
+
+router.put('/me/profile', requireAuth, async (req, res) => {
+    if (req.collector.role !== 'collector') return res.status(403).json({ error: 'collector account required' });
+
+    const name = nonEmptyString(req.body.name);
+    const email = nonEmptyString(req.body.email);
+    const phoneNumber = nonEmptyString(req.body.phone_number);
+
+    if (!name && !email && !phoneNumber) {
+        return res.status(400).json({ error: 'at least one of name, email, or phone_number is required' });
+    }
+
+    try {
+        const updated = await withTenant(req.collector.company_id, async (client) => {
+            const result = await client.query(
+                `UPDATE collectors
+                 SET full_name = COALESCE($1, full_name),
+                     email = COALESCE($2, email),
+                     phone_number = COALESCE($3, phone_number)
+                 WHERE id = $4
+                 RETURNING id, username, full_name, email, phone_number, collector_type, subscription_tier`,
+                [name, email, phoneNumber, req.collector.sub]
+            );
+            return result.rows[0];
+        });
+        if (!updated) return res.status(404).json({ error: 'collector not found' });
+        return res.json(updated);
+    } catch (err) {
+        return handleDbError(err, res, 'collector profile update');
     }
 });
 

@@ -2,6 +2,7 @@ const express = require('express');
 const { pool, withTenant } = require('../db/pool');
 const { requireAuth } = require('../middleware/auth');
 const { handleDbError } = require('../utils/dbErrors');
+const { finiteNumber } = require('../utils/validation');
 
 const router = express.Router();
 
@@ -75,6 +76,38 @@ router.post('/heartbeat/batch', requireAuth, async (req, res) => {
         return res.json({ applied_entries: entries.length, ...updated });
     } catch (err) {
         return handleDbError(err, res, 'batch heartbeat');
+    }
+});
+
+// [LOC-05] Collector Live Location — write side. Foreground-only, throttled
+// client-side to one ping per LOCATION_UPDATE_INTERVAL_MS (see
+// ActiveJobScreen.tsx) and only while a job is 'assigned' — never a
+// continuous background stream (matches the offline-first / battery-budget
+// constraints in the SRS same as /heartbeat above).
+// Self-scoped write: a collector can only ever update their own row.
+// Body: { latitude, longitude }
+router.post('/location', requireAuth, async (req, res) => {
+    if (req.collector.role !== 'collector') {
+        return res.status(403).json({ error: 'collector account required' });
+    }
+
+    const latitude = finiteNumber(req.body.latitude, { min: -90, max: 90 });
+    const longitude = finiteNumber(req.body.longitude, { min: -180, max: 180 });
+    if (latitude === null || longitude === null) {
+        return res.status(400).json({ error: 'valid latitude and longitude are required' });
+    }
+
+    try {
+        const result = await pool.query(
+            'SELECT * FROM update_collector_location($1, $2, $3)',
+            [req.collector.sub, latitude, longitude]
+        );
+        if (result.rows.length === 0) {
+            return res.status(409).json({ error: 'no active assigned job for this collector' });
+        }
+        return res.json(result.rows[0]);
+    } catch (err) {
+        return handleDbError(err, res, 'location update');
     }
 });
 

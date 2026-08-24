@@ -5,6 +5,7 @@ const { positiveInteger, finiteNumber } = require('../utils/validation');
 const { handleDbError } = require('../utils/dbErrors');
 const { evaluateMobility } = require('../services/mobilityEvaluation');
 const { scheduleAdminHoldExpiry, scheduleCascade, cancelPendingJobs } = require('../queues/dispatchQueue');
+const { sendPushNotification } = require('../utils/pushService');
 
 const router = express.Router();
 
@@ -14,9 +15,6 @@ const VALID_PAYMENT_METHODS = ['CASH', 'MOMO'];
 
 // [DISP-01/03/04/05] Create a pickup request.
 // Body: { client_id, bag_count, waste_type, latitude, longitude }
-// NOTE: client_id is accepted directly since client auth doesn't exist yet
-// (same flagged gap as ONBOARD — a future sprint should replace this with
-// a client session/JWT the way collectors already have).
 router.post('/', requireAuth, requireRole('client'), async (req, res) => {
     const { client_id, bag_count, waste_type, latitude, longitude, payment_method } = req.body;
     const clientId = positiveInteger(client_id);
@@ -51,8 +49,6 @@ router.post('/', requireAuth, requireRole('client'), async (req, res) => {
 
         const initialStatus = isCorporate ? 'searching_corporate' : 'broadcast_public';
         const adminHoldExpiresAt = isCorporate ? new Date(Date.now() + require('../queues/dispatchQueue').ADMIN_HOLD_MS) : null;
-        // [PRICE-01] ASSUMPTION FLAGGED — see migration 014. Flat 500 FCFA/bag,
-        // no real pricing model exists yet.
         const estimatedPriceFcfa = bagCount * 500;
 
         const created = await withTenant(client.company_id, async (dbClient) => {
@@ -86,9 +82,6 @@ router.post('/', requireAuth, requireRole('client'), async (req, res) => {
 });
 
 // [DISP-04] Admin manual delegation within the 2-minute hold window.
-// Gated the same way as admin-create — see the same flagged caveat there
-// about there being no real admin/staff auth entity yet.
-// Body: { collector_id }
 router.post('/:id/assign', requireAdminKey, async (req, res) => {
     const requestId = positiveInteger(req.params.id);
     if (!requestId) return res.status(400).json({ error: 'invalid pickup request id' });
@@ -99,10 +92,6 @@ router.post('/:id/assign', requireAdminKey, async (req, res) => {
     }
 
     try {
-        // Look up which company this request belongs to, so we scope the
-        // UPDATE within that tenant. Uses a SECURITY DEFINER lookup (see
-        // migration 009) — a plain query defaults to 'public' context and
-        // can never see a 'searching_corporate' row scoped to a company.
         const lookup = await pool.query('SELECT * FROM find_pickup_request_company($1)', [requestId]);
         if (lookup.rows.length === 0) {
             return res.status(404).json({ error: 'pickup request not found' });
@@ -139,20 +128,37 @@ router.post('/:id/assign', requireAdminKey, async (req, res) => {
     }
 });
 
-// [DISP-05] Collector claims an open broadcast_public request.
-// Uses the SECURITY DEFINER claim function — atomic, works across tenants
-// for genuinely public rows, and can't be used to forge a claim on a
-// non-public row (see migration 007 for why).
+// [DISP-05/DISP-10] Collector claims a job. Independent collectors claim
+// broadcast_public jobs via claim_pickup_request; corporate collectors
+// claim their own company's still-open searching_corporate jobs via
+// claim_corporate_pickup_request.
 router.post('/:id/claim', requireAuth, requireRole('collector'), async (req, res) => {
     const requestId = positiveInteger(req.params.id);
     if (!requestId) return res.status(400).json({ error: 'invalid pickup request id' });
 
     try {
-        const result = await pool.query('SELECT * FROM claim_pickup_request($1, $2)', [requestId, req.collector.sub]);
+        const fn = req.collector.collector_type === 'corporate'
+            ? 'claim_corporate_pickup_request'
+            : 'claim_pickup_request';
+        const result = await pool.query(`SELECT * FROM ${fn}($1, $2)`, [requestId, req.collector.sub]);
         if (result.rows.length === 0) {
-            return res.status(409).json({ error: 'request already claimed, not public, or does not exist' });
+            return res.status(409).json({ error: 'request already claimed, not available to you, or does not exist' });
         }
         await cancelPendingJobs(requestId);
+        // [NOTIF-04] Real push — notify the client their request was claimed.
+    // Fire-and-forget: a push failure must never break the claim itself.
+    const clientLookup = await pool.query(
+        'SELECT push_token FROM clients WHERE id = (SELECT client_id FROM pickup_requests WHERE id = $1)',
+        [requestId]
+    );
+    if (clientLookup.rows[0]?.push_token) {
+        void sendPushNotification(
+            clientLookup.rows[0].push_token,
+            'Collector on the way!',
+            'A collector has accepted your pickup request.',
+            { pickup_request_id: requestId }
+        );
+    }
         return res.json(result.rows[0]);
     } catch (err) {
         return handleDbError(err, res, 'claim request');
@@ -222,6 +228,26 @@ router.get('/:id', requireAuth, async (req, res) => {
         return res.json(result.rows[0]);
     } catch (err) {
         return handleDbError(err, res, 'pickup request status lookup');
+    }
+});
+
+// [LOC-03] Client polls their assigned collector's last known coordinates.
+// Only works while routing_status = 'assigned' — matches the window the
+// collector app is actually sending updates in.
+router.get('/:id/collector-location', requireAuth, requireRole('client'), async (req, res) => {
+    const requestId = positiveInteger(req.params.id);
+    if (!requestId) return res.status(400).json({ error: 'invalid pickup request id' });
+    try {
+        const result = await pool.query(
+            'SELECT * FROM get_collector_location_for_request($1, $2)',
+            [requestId, req.collector.sub]
+        );
+        if (result.rows.length === 0) {
+            return res.status(404).json({ error: 'no live location available for this request yet' });
+        }
+        return res.json(result.rows[0]);
+    } catch (err) {
+        return handleDbError(err, res, 'collector location lookup');
     }
 });
 
