@@ -8,6 +8,7 @@ type Props = {
   onViewRequests: () => void;
   onOpenTracking: (requestId: number) => void;
   onOpenProfile: () => void;
+  onReportDumping: () => void;
   onLogout: () => void;
   lastRequestId: number | null;
   onRecentRequest: (requestId: number) => void;
@@ -19,6 +20,7 @@ export default function ClientHomeScreen({
   onViewRequests,
   onOpenTracking,
   onOpenProfile,
+  onReportDumping,
   onLogout,
   lastRequestId,
   onRecentRequest,
@@ -77,6 +79,11 @@ export default function ClientHomeScreen({
         <Text style={styles.requestText}>Request a pickup</Text>
       </Pressable>
 
+      <Pressable style={styles.reportButton} onPress={onReportDumping}>
+        <Text style={styles.reportTitle}>Report illegal dumping</Text>
+        <Text style={styles.reportSubtitle}>Tell CleanLife about an unsafe dumping site</Text>
+      </Pressable>
+
       {lastRequestId && (
         <Pressable style={styles.trackCard} onPress={() => onOpenTracking(lastRequestId)}>
           <Text style={styles.trackTitle}>Track your last request</Text>
@@ -116,6 +123,9 @@ const styles = StyleSheet.create({
   },
   requestEmoji: { fontSize: 40, marginBottom: 8 },
   requestText: { fontSize: 17, fontWeight: '800', color: '#065f46' },
+  reportButton: { backgroundColor: '#fff7ed', borderColor: '#fdba74', borderRadius: 14, borderWidth: 1, marginBottom: 16, padding: 16 },
+  reportTitle: { color: '#9a3412', fontWeight: '800' },
+  reportSubtitle: { color: '#c2410c', fontSize: 12, marginTop: 4 },
   trackCard: {
     backgroundColor: '#ecfdf5',
     borderRadius: 14,

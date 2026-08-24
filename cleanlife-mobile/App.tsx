@@ -13,6 +13,7 @@ import ClientHomeScreen from './src/screens/client/ClientHomeScreen';
 import RequestPickupScreen from './src/screens/client/RequestPickupScreen';
 import TrackPickupScreen from './src/screens/client/TrackPickupScreen';
 import MyRequestsScreen from './src/screens/client/MyRequestsScreen';
+import ReportDumpingScreen from './src/screens/client/ReportDumpingScreen';
 
 import CollectorHomeScreen from './src/screens/collector/CollectorHomeScreen';
 import AvailableJobsScreen from './src/screens/collector/AvailableJobsScreen';
@@ -27,10 +28,10 @@ type Phase = 'checking' | 'splash' | 'role_select' | 'auth' | 'client_app' | 'co
 
 // 'profile' now renders SettingsScreen (hub) instead of the profile
 // screens directly — those live inside SettingsScreen to avoid duplication.
-type ClientScreen = 'home' | 'request' | 'requests' | 'track' | 'wallet' | 'profile';
+type ClientScreen = 'home' | 'request' | 'requests' | 'track' | 'wallet' | 'profile' | 'report';
 type CollectorScreen = 'home' | 'jobs' | 'active_job' | 'wallet' | 'profile';
 
-const CLIENT_SCREENS_WITHOUT_TAB_BAR: ClientScreen[] = ['track', 'request'];
+  const CLIENT_SCREENS_WITHOUT_TAB_BAR: ClientScreen[] = ['track', 'request', 'report'];
 const COLLECTOR_SCREENS_WITHOUT_TAB_BAR: CollectorScreen[] = ['active_job'];
 
 export default function App() {
@@ -158,6 +159,7 @@ export default function App() {
                 setClientScreen('track');
               }}
               onOpenProfile={() => setClientScreen('profile')}
+              onReportDumping={() => setClientScreen('report')}
               onLogout={handleLogout}
               onRecentRequest={handleRecentRequest}
             />
@@ -171,6 +173,9 @@ export default function App() {
                 setClientScreen('track');
               }}
             />
+          )}
+          {phase === 'client_app' && clientScreen === 'report' && (
+            <ReportDumpingScreen onBack={() => setClientScreen('home')} />
           )}
           {phase === 'client_app' && clientScreen === 'track' && trackingId && (
             <TrackPickupScreen

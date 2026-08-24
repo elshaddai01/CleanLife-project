@@ -5,6 +5,7 @@ const { hashPassword } = require('../utils/password');
 const { nonEmptyString, positiveInteger } = require('../utils/validation');
 const { requireAuth } = require('../middleware/auth');
 const { sendOtpSms } = require('../utils/sms');
+const { sendOtpEmail } = require('../utils/email');
 const { signToken, signRefreshToken } = require('../utils/jwt');
 
 const router = express.Router();
@@ -58,7 +59,6 @@ router.post('/register', async (req, res) => {
         const password_hash = password ? await hashPassword(password) : null;
 
         // Generate verification codes
-        const phoneCode = Math.floor(100000 + Math.random() * 900000).toString();
         const emailCode = Math.floor(100000 + Math.random() * 900000).toString();
 
         const expiry = new Date(Date.now() + 10 * 60 * 1000);
@@ -74,12 +74,10 @@ router.post('/register', async (req, res) => {
                     phone_number,
                     company_id,
                     password_hash,
-                    verification_code,
-                    verification_expiry,
                     email_verification_code,
                     email_verification_expiry
                 )
-                VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+                VALUES ($1,$2,$3,$4,$5,$6,$7)
                 RETURNING id, name, email, phone_number, company_id, created_at`,
                 [
                     name,
@@ -87,8 +85,6 @@ router.post('/register', async (req, res) => {
                     phone_number,
                     tenantId,
                     password_hash,
-                    phoneCode,
-                    expiry,
                     emailCode,
                     expiry
                 ]
@@ -102,17 +98,17 @@ router.post('/register', async (req, res) => {
         // account still exists with a valid stored code — don't fail
         // registration over a delivery hiccup, but tell the client so the
         // UI can offer a "resend code" action instead of silently hanging.
-        const smsSent = await sendOtpSms(phone_number, phoneCode);
+        const emailSent = await sendOtpEmail(email, emailCode);
 
         return res.status(201).json({
-            message: smsSent
-                ? 'Registration successful. Verify email and phone.'
-                : 'Registration successful, but the SMS could not be sent. Use "resend code" to try again.',
-            sms_sent: smsSent,
+            message: emailSent
+                ? 'Registration successful. Check your email for the verification code.'
+                : 'Registration successful, but the email could not be sent. Configure SMTP before continuing.',
+            email_sent: emailSent,
             client: inserted,
             otp_required: true,
-            ...(process.env.NODE_ENV !== 'production' && !smsSent
-                ? { development_otp: phoneCode }
+            ...(process.env.NODE_ENV !== 'production' && !emailSent
+                ? { development_otp: emailCode }
                 : {}),
         });
 
@@ -238,7 +234,7 @@ router.post('/resend-code', async (req, res) => {
             `UPDATE clients
              SET verification_code = $1, verification_expiry = $2
              WHERE phone_number = $3 AND phone_verified = false
-             RETURNING id`,
+             RETURNING id, name, phone_number, company_id`,
             [phoneCode, expiry, phone_number]
         );
 
@@ -278,7 +274,7 @@ router.post('/verify-email', async (req, res) => {
              WHERE email = $1
              AND email_verification_code = $2
              AND email_verification_expiry > NOW()
-             RETURNING id`,
+             RETURNING id, name, phone_number, company_id`,
             [email, code]
         );
 
@@ -290,8 +286,23 @@ router.post('/verify-email', async (req, res) => {
         }
 
 
-        res.json({
-            message: 'Email verified successfully'
+        const client = result.rows[0];
+        const user = {
+            id: client.id,
+            username: client.phone_number,
+            role: 'client',
+            company_id: client.company_id,
+            name: client.name,
+            phone_number: client.phone_number,
+        };
+        return res.json({
+            message: 'Email verified successfully',
+            user,
+            tokens: {
+                access_token: signToken(user),
+                refresh_token: signRefreshToken(user),
+                expires_in: process.env.JWT_EXPIRES_IN || '8h',
+            },
         });
 
 

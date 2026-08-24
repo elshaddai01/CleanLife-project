@@ -17,6 +17,7 @@ const { startDispatchWorker } = require('./src/queues/dispatchWorker');
 const { pool, checkDatabaseConnection } = require('./src/db/pool');
 const etaRouter = require('./src/routes/etaRoutes');
 const notificationsRouter = require('./src/routes/notifications');
+const reportsRouter = require('./src/routes/reports');
 const app = express();
 app.disable('x-powered-by');
 app.use(cors({
@@ -40,6 +41,7 @@ app.use('/ratings', ratingsRouter);
 app.use('/uploads', uploadsRouter);
 app.use('/eta', etaRouter);
 app.use('/notifications', notificationsRouter);
+app.use('/reports', reportsRouter);
 app.get('/health', async (req, res) => {
     try {
         const database = await checkDatabaseConnection();

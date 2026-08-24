@@ -214,7 +214,7 @@ export const authApi = {
     phone_number: string;
     company_code?: string;
   }) {
-    return request<{ id: number; name: string; phone_number: string; company_id: number | null; company_name: string | null; created_at: string; sms_sent: boolean; otp_required: boolean; development_otp?: string }>(
+    return request<{ id: number; name: string; phone_number: string; company_id: number | null; company_name: string | null; created_at: string; email_sent: boolean; otp_required: boolean; development_otp?: string }>(
       '/clients/register',
       { method: 'POST', body: JSON.stringify(params) },
       false
@@ -299,11 +299,20 @@ export const authApi = {
   },
 
   verifyEmail(email: string, code: string) {
-    return request<{ message: string }>(
+    return request<LoginResponse>(
       '/clients/verify-email',
       { method: 'POST', body: JSON.stringify({ email, code }) },
       false
-    );
+    ).then((res): ClientAuthResult => ({
+      token: res.tokens.access_token,
+      refreshToken: res.tokens.refresh_token,
+      client: {
+        id: res.user.id,
+        name: res.user.name || '',
+        phone_number: res.user.phone_number || '',
+        company_id: res.user.company_id,
+      },
+    }));
   },
 
   requestPasswordReset(phone_number: string) {
@@ -577,5 +586,14 @@ export const notificationsApi = {
       method: 'POST',
       body: JSON.stringify({ push_token: pushToken }),
     });
+  },
+};
+
+export const reportsApi = {
+  createIllegalDumping(params: { description: string; latitude: number; longitude: number }) {
+    return request<{ id: number; description: string; latitude: number; longitude: number; status: string; created_at: string }>(
+      '/reports/illegal-dumping',
+      { method: 'POST', body: JSON.stringify(params) }
+    );
   },
 };

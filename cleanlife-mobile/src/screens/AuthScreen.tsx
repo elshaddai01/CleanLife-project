@@ -84,14 +84,14 @@ export default function AuthScreen({ initialRole, onAuthenticated, onBack }: Pro
             const registration = await authApi.registerClient({ name, email, phone_number: phone });
             setAwaitingOtp(true);
             Alert.alert(
-              registration.sms_sent ? 'OTP sent' : 'OTP created',
-              registration.sms_sent
-                ? 'Enter the 6-digit code sent to your phone.'
-                : `The SMS could not be delivered. For local testing, use OTP: ${registration.development_otp || 'check the backend log'}`
+              registration.email_sent ? 'OTP sent' : 'OTP created',
+              registration.email_sent
+                ? 'Enter the 6-digit code sent to your email.'
+                : `Email is not configured. For local testing, use OTP: ${registration.development_otp || 'check the backend log'}`
             );
             return;
           }
-          const result = await authApi.verifyPhone(phone, otp.trim());
+          const result = await authApi.verifyEmail(email, otp.trim());
           await setSession(result.token, 'client', result.client.id, result.client, result.refreshToken);
           registerPushTokenInBackground();
           onAuthenticated('client');
