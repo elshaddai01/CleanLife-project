@@ -34,6 +34,7 @@ async function requireAuth(req, res, next) {
                 code: 'TOKEN_EXPIRED'
             });
         }
+
         return res.status(401).json({
             error: 'invalid or expired token',
             code: 'INVALID_TOKEN'
@@ -43,27 +44,37 @@ async function requireAuth(req, res, next) {
 
 function requireAdminKey(req, res, next) {
     const key = req.headers['x-admin-key'];
+
     if (!key || key !== config.adminApiKey) {
-        return res.status(401).json({ error: 'invalid admin key' });
+        return res.status(401).json({
+            error: 'invalid admin key'
+        });
     }
+
     return next();
 }
 
 function requireRole(allowedRoles) {
-    const roles = Array.isArray(allowedRoles) ? allowedRoles : [allowedRoles];
+    const roles = Array.isArray(allowedRoles)
+        ? allowedRoles
+        : [allowedRoles];
 
     return (req, res, next) => {
         if (!req.user && !req.collector) {
-            return res.status(401).json({ error: 'authentication required' });
+            return res.status(401).json({
+                error: 'authentication required'
+            });
         }
 
         const user = req.user || req.collector;
+
         if (!roles.includes(user.role)) {
             return res.status(403).json({
                 error: `requires one of these roles: ${roles.join(', ')}`,
                 your_role: user.role
             });
         }
+
         return next();
     };
 }
@@ -72,26 +83,35 @@ function requireRole(allowedRoles) {
 // so it's obvious at a glance which routes are gated by real admin login
 // (super_admin/company_admin) versus client/collector roles.
 function requireAdminRole(allowedRoles) {
-    const roles = Array.isArray(allowedRoles) ? allowedRoles : [allowedRoles];
+    const roles = Array.isArray(allowedRoles)
+        ? allowedRoles
+        : [allowedRoles];
 
     return (req, res, next) => {
         const user = req.user || req.collector;
+
         if (!user) {
-            return res.status(401).json({ error: 'authentication required' });
+            return res.status(401).json({
+                error: 'authentication required'
+            });
         }
+
         if (!roles.includes(user.role)) {
             return res.status(403).json({
                 error: `requires one of these admin roles: ${roles.join(', ')}`,
                 your_role: user.role
             });
         }
+
         return next();
     };
 }
 
 function requireOwnership(req, res, next) {
     if (!req.user && !req.collector) {
-        return res.status(401).json({ error: 'authentication required' });
+        return res.status(401).json({
+            error: 'authentication required'
+        });
     }
 
     const user = req.user || req.collector;
@@ -100,11 +120,18 @@ function requireOwnership(req, res, next) {
         return next();
     }
 
-    const targetUserId = req.params.id || req.params.userId || req.params.collectorId ||
-                         req.params.clientId || req.body.user_id || req.body.client_id;
+    const targetUserId =
+        req.params.id ||
+        req.params.userId ||
+        req.params.collectorId ||
+        req.params.clientId ||
+        req.body.user_id ||
+        req.body.client_id;
 
     if (!targetUserId) {
-        return res.status(400).json({ error: 'user ID required' });
+        return res.status(400).json({
+            error: 'user ID required'
+        });
     }
 
     if (parseInt(user.sub) !== parseInt(targetUserId)) {

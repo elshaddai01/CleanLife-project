@@ -212,10 +212,9 @@ export const authApi = {
     name: string;
     email: string;
     phone_number: string;
-    password: string;
     company_code?: string;
   }) {
-    return request<{ id: number; name: string; phone_number: string; company_id: number | null; company_name: string | null; created_at: string }>(
+    return request<{ id: number; name: string; phone_number: string; company_id: number | null; company_name: string | null; created_at: string; sms_sent: boolean; otp_required: boolean; development_otp?: string }>(
       '/clients/register',
       { method: 'POST', body: JSON.stringify(params) },
       false
@@ -283,11 +282,20 @@ export const authApi = {
   },
 
   verifyPhone(phone_number: string, code: string) {
-    return request<{ message: string }>(
+    return request<LoginResponse>(
       '/clients/verify-phone',
       { method: 'POST', body: JSON.stringify({ phone_number, code }) },
       false
-    );
+    ).then((res): ClientAuthResult => ({
+      token: res.tokens.access_token,
+      refreshToken: res.tokens.refresh_token,
+      client: {
+        id: res.user.id,
+        name: res.user.name || '',
+        phone_number: res.user.phone_number || '',
+        company_id: res.user.company_id,
+      },
+    }));
   },
 
   verifyEmail(email: string, code: string) {

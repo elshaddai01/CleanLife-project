@@ -34,7 +34,7 @@ if (!selected || selected.score < 0) {
 // every `npm start`. Single source of truth now: set EXPO_PUBLIC_API_PORT
 // in the shell/CI env if you need to override; otherwise this fallback
 // must match cleanlife-backend/.env's PORT value exactly.
-const apiPort = process.env.EXPO_PUBLIC_API_PORT || '5000';
+const apiPort = process.env.EXPO_PUBLIC_API_PORT || '3001';
 const contents = `# Generated automatically by npm start.\nEXPO_PUBLIC_API_BASE_URL=http://${selected.address}:${apiPort}\nEXPO_PUBLIC_API_PORT=${apiPort}\n`;
 fs.writeFileSync(path.resolve(__dirname, '../.env.local'), contents, 'utf8');
 console.log(`CleanLife mobile API: http://${selected.address}:${apiPort} (${selected.name})`);

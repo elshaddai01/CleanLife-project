@@ -4,12 +4,14 @@ const { handleDbError } = require('../utils/dbErrors');
 const { hashPassword } = require('../utils/password');
 const { nonEmptyString, positiveInteger } = require('../utils/validation');
 const { requireAuth } = require('../middleware/auth');
+const { sendOtpSms } = require('../utils/sms');
+const { signToken, signRefreshToken } = require('../utils/jwt');
 
 const router = express.Router();
 
 
 // POST /clients/register
-// Body: { name, email, phone_number, password, company_code? }
+// Body: { name, email, phone_number, password?, company_code? }
 router.post('/register', async (req, res) => {
     const name = nonEmptyString(req.body.name);
     const email = nonEmptyString(req.body.email);
@@ -17,13 +19,13 @@ router.post('/register', async (req, res) => {
     const password = nonEmptyString(req.body.password);
     const company_code = nonEmptyString(req.body.company_code);
 
-    if (!name || !email || !phone_number || !password) {
+    if (!name || !email || !phone_number) {
         return res.status(400).json({
-            error: 'name, email, phone_number, and password are required'
+            error: 'name, email, and phone_number are required'
         });
     }
 
-    if (password.length < 8) {
+    if (password && password.length < 8) {
         return res.status(400).json({
             error: 'password must be at least 8 characters'
         });
@@ -53,7 +55,7 @@ router.post('/register', async (req, res) => {
 
         const tenantId = company ? company.id : null;
 
-        const password_hash = await hashPassword(password);
+        const password_hash = password ? await hashPassword(password) : null;
 
         // Generate verification codes
         const phoneCode = Math.floor(100000 + Math.random() * 900000).toString();
@@ -96,9 +98,22 @@ router.post('/register', async (req, res) => {
         });
 
 
+                // [OTP-01] Fire SMS after the client row exists. If SMS fails, the
+        // account still exists with a valid stored code — don't fail
+        // registration over a delivery hiccup, but tell the client so the
+        // UI can offer a "resend code" action instead of silently hanging.
+        const smsSent = await sendOtpSms(phone_number, phoneCode);
+
         return res.status(201).json({
-            message: 'Registration successful. Verify email and phone.',
-            client: inserted
+            message: smsSent
+                ? 'Registration successful. Verify email and phone.'
+                : 'Registration successful, but the SMS could not be sent. Use "resend code" to try again.',
+            sms_sent: smsSent,
+            client: inserted,
+            otp_required: true,
+            ...(process.env.NODE_ENV !== 'production' && !smsSent
+                ? { development_otp: phoneCode }
+                : {}),
         });
 
 
@@ -170,7 +185,7 @@ router.post('/verify-phone', async (req, res) => {
              WHERE phone_number = $1
              AND verification_code = $2
              AND verification_expiry > NOW()
-             RETURNING id`,
+             RETURNING id, name, phone_number, company_id`,
             [phone_number, code]
         );
 
@@ -182,8 +197,23 @@ router.post('/verify-phone', async (req, res) => {
         }
 
 
-        res.json({
-            message: 'Phone verified successfully'
+        const client = result.rows[0];
+        const user = {
+            id: client.id,
+            username: client.phone_number,
+            role: 'client',
+            company_id: client.company_id,
+            name: client.name,
+            phone_number: client.phone_number,
+        };
+        return res.json({
+            message: 'Phone verified successfully',
+            user,
+            tokens: {
+                access_token: signToken(user),
+                refresh_token: signRefreshToken(user),
+                expires_in: process.env.JWT_EXPIRES_IN || '8h',
+            },
         });
 
 
@@ -192,6 +222,36 @@ router.post('/verify-phone', async (req, res) => {
     }
 });
 
+// POST /clients/resend-code
+// Body: { phone_number }
+router.post('/resend-code', async (req, res) => {
+    const phone_number = nonEmptyString(req.body.phone_number);
+    if (!phone_number) {
+        return res.status(400).json({ error: 'phone_number is required' });
+    }
+
+    try {
+        const phoneCode = Math.floor(100000 + Math.random() * 900000).toString();
+        const expiry = new Date(Date.now() + 10 * 60 * 1000);
+
+        const result = await pool.query(
+            `UPDATE clients
+             SET verification_code = $1, verification_expiry = $2
+             WHERE phone_number = $3 AND phone_verified = false
+             RETURNING id`,
+            [phoneCode, expiry, phone_number]
+        );
+
+        if (result.rows.length === 0) {
+            return res.status(404).json({ error: 'client not found or already verified' });
+        }
+
+        const smsSent = await sendOtpSms(phone_number, phoneCode);
+        return res.json({ message: smsSent ? 'Code resent' : 'Failed to send SMS', sms_sent: smsSent });
+    } catch (err) {
+        return handleDbError(err, res, 'resend code');
+    }
+});
 
 
 // POST /clients/verify-email
@@ -283,10 +343,10 @@ router.post('/request-password-reset', async (req,res)=>{
         }
 
 
-        res.json({
-            message:'Password reset code generated',
-            reset_code: resetCode
-        });
+       res.json({
+    message:'Password reset code generated',
+    reset_code: resetCode   // ← anyone who knows a phone number gets the code back directly, no SMS needed
+});
 
 
     }catch(err){

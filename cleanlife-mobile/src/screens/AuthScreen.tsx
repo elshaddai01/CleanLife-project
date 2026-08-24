@@ -42,10 +42,22 @@ export default function AuthScreen({ initialRole, onAuthenticated, onBack }: Pro
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [companyCode, setCompanyCode] = useState('');
+  const [otp, setOtp] = useState('');
+  const [awaitingOtp, setAwaitingOtp] = useState(false);
   const [loading, setLoading] = useState(false);
 
   const handleSubmit = async () => {
-    if (password.length < 8) {
+    if (role === 'client' && mode === 'register' && awaitingOtp) {
+      if (!/^\d{6}$/.test(otp.trim())) {
+        Alert.alert('Invalid OTP', 'Enter the 6-digit code sent to your phone.');
+        return;
+      }
+    } else if (role === 'client' && mode === 'register') {
+      if (!name.trim() || !email.trim() || !phone.trim()) {
+        Alert.alert('Missing details', 'Name, email, and phone number are required.');
+        return;
+      }
+    } else if (password.length < 8) {
       Alert.alert('Invalid password', 'Password must be at least 8 characters.');
       return;
     }
@@ -68,13 +80,22 @@ export default function AuthScreen({ initialRole, onAuthenticated, onBack }: Pro
     try {
       if (role === 'client') {
         if (mode === 'register') {
-          await authApi.registerClient({
-            name,
-            email,
-            phone_number: phone,
-            password,
-            company_code: companyCode || undefined,
-          });
+          if (!awaitingOtp) {
+            const registration = await authApi.registerClient({ name, email, phone_number: phone });
+            setAwaitingOtp(true);
+            Alert.alert(
+              registration.sms_sent ? 'OTP sent' : 'OTP created',
+              registration.sms_sent
+                ? 'Enter the 6-digit code sent to your phone.'
+                : `The SMS could not be delivered. For local testing, use OTP: ${registration.development_otp || 'check the backend log'}`
+            );
+            return;
+          }
+          const result = await authApi.verifyPhone(phone, otp.trim());
+          await setSession(result.token, 'client', result.client.id, result.client, result.refreshToken);
+          registerPushTokenInBackground();
+          onAuthenticated('client');
+          return;
         }
         const result = await authApi.loginClient(phone, password);
         await setSession(result.token, 'client', result.client.id, result.client, result.refreshToken);
@@ -111,13 +132,13 @@ export default function AuthScreen({ initialRole, onAuthenticated, onBack }: Pro
         <View style={styles.toggleRow}>
           <Pressable
             style={[styles.toggleButton, mode === 'login' && styles.toggleButtonActive]}
-            onPress={() => setMode('login')}
+            onPress={() => { setMode('login'); setAwaitingOtp(false); setOtp(''); }}
           >
             <Text style={mode === 'login' ? styles.toggleTextActive : styles.toggleText}>Log in</Text>
           </Pressable>
           <Pressable
             style={[styles.toggleButton, mode === 'register' && styles.toggleButtonActive]}
-            onPress={() => setMode('register')}
+            onPress={() => { setMode('register'); setAwaitingOtp(false); setOtp(''); }}
           >
             <Text style={mode === 'register' ? styles.toggleTextActive : styles.toggleText}>Register</Text>
           </Pressable>
@@ -125,7 +146,7 @@ export default function AuthScreen({ initialRole, onAuthenticated, onBack }: Pro
 
         {role === 'client' ? (
           <>
-            {mode === 'register' && (
+            {mode === 'register' && !awaitingOtp && (
               <>
                 <TextInput style={styles.input} placeholder="Name" value={name} onChangeText={setName} />
                 <TextInput
@@ -138,14 +159,25 @@ export default function AuthScreen({ initialRole, onAuthenticated, onBack }: Pro
                 />
               </>
             )}
-            <TextInput
-              style={styles.input}
-              placeholder="Phone number"
-              value={phone}
-              onChangeText={setPhone}
-              keyboardType="phone-pad"
-            />
-            {mode === 'register' && (
+            {mode === 'register' && awaitingOtp ? (
+              <TextInput
+                style={styles.input}
+                placeholder="6-digit OTP"
+                value={otp}
+                onChangeText={setOtp}
+                keyboardType="number-pad"
+                maxLength={6}
+              />
+            ) : (
+              <TextInput
+                style={styles.input}
+                placeholder="Phone number"
+                value={phone}
+                onChangeText={setPhone}
+                keyboardType="phone-pad"
+              />
+            )}
+            {mode === 'register' && !awaitingOtp && (
               <TextInput
                 style={styles.input}
                 placeholder="Company code (optional)"
@@ -158,19 +190,19 @@ export default function AuthScreen({ initialRole, onAuthenticated, onBack }: Pro
           <TextInput style={styles.input} placeholder="Username" value={username} onChangeText={setUsername} />
         )}
 
-        <TextInput
+        {!(role === 'client' && mode === 'register') && <TextInput
           style={styles.input}
           placeholder="Password"
           value={password}
           onChangeText={setPassword}
           secureTextEntry
-        />
+        />}
 
         <Pressable style={styles.submitButton} onPress={handleSubmit} disabled={loading}>
           {loading ? (
             <ActivityIndicator color="#fff" />
           ) : (
-            <Text style={styles.submitText}>{mode === 'register' ? 'Register & log in' : 'Log in'}</Text>
+            <Text style={styles.submitText}>{mode === 'register' ? (awaitingOtp ? 'Verify and log in' : 'Send OTP') : 'Log in'}</Text>
           )}
         </Pressable>
       </ScrollView>
