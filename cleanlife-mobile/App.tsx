@@ -13,18 +13,20 @@ import RequestPickupScreen from './src/screens/client/RequestPickupScreen';
 import TrackPickupScreen from './src/screens/client/TrackPickupScreen';
 import MyRequestsScreen from './src/screens/client/MyRequestsScreen';
 import ClientProfileScreen from './src/screens/client/ClientProfileScreen';
+import RateCollectorScreen from './src/screens/client/RateCollectorScreen';
 
 import CollectorHomeScreen from './src/screens/collector/CollectorHomeScreen';
 import AvailableJobsScreen from './src/screens/collector/AvailableJobsScreen';
 import ActiveJobScreen from './src/screens/collector/ActiveJobScreen';
 import CollectorProfileScreen from './src/screens/collector/CollectorProfileScreen';
+import RateClientScreen from './src/screens/collector/RateClientScreen';
 
 import WalletScreen from './src/screens/shared/WalletScreen';
 
 type Phase = 'checking' | 'splash' | 'role_select' | 'auth' | 'client_app' | 'collector_app';
 
-type ClientScreen = 'home' | 'request' | 'requests' | 'track' | 'wallet' | 'profile';
-type CollectorScreen = 'home' | 'jobs' | 'active_job' | 'wallet' | 'profile';
+type ClientScreen = 'home' | 'request' | 'requests' | 'track' | 'wallet' | 'profile' | 'rate';
+type CollectorScreen = 'home' | 'jobs' | 'active_job' | 'wallet' | 'profile' | 'rate';
 
 export default function App() {
   const [phase, setPhase] = useState<Phase>('checking');
@@ -33,9 +35,11 @@ export default function App() {
   const [clientScreen, setClientScreen] = useState<ClientScreen>('home');
   const [lastRequestId, setLastRequestId] = useState<number | null>(null);
   const [trackingId, setTrackingId] = useState<number | null>(null);
+  const [ratingRequestId, setRatingRequestId] = useState<number | null>(null);
 
   const [collectorScreen, setCollectorScreen] = useState<CollectorScreen>('home');
   const [activeJobId, setActiveJobId] = useState<number | null>(null);
+  const [collectorRatingRequestId, setCollectorRatingRequestId] = useState<number | null>(null);
 
   useEffect(() => {
     (async () => {
@@ -147,8 +151,21 @@ export default function App() {
           requestId={trackingId}
           onBack={() => setClientScreen('home')}
           onSessionExpired={handleSessionExpired}
+          onRateCollector={() => {
+            setRatingRequestId(trackingId);
+            setClientScreen('rate');
+          }}
         />
       )}
+      {phase === 'client_app' && clientScreen === 'rate' && ratingRequestId && (
+        <RateCollectorScreen
+          requestId={ratingRequestId}
+          onBack={() => setClientScreen('track')}
+          onSubmitted={() => setClientScreen('home')}
+          onSessionExpired={handleSessionExpired}
+        />
+      )}
+
       {phase === 'client_app' && clientScreen === 'wallet' && (
         <WalletScreen role="client" onBack={() => setClientScreen('home')} onSessionExpired={handleSessionExpired} />
       )}
@@ -195,11 +212,24 @@ export default function App() {
           onBack={() => setCollectorScreen('jobs')}
           onSessionExpired={handleSessionExpired}
           onCompleted={() => {
+            setCollectorRatingRequestId(activeJobId);
             setActiveJobId(null);
+            setCollectorScreen('rate');
+          }}
+        />
+      )}
+      {phase === 'collector_app' && collectorScreen === 'rate' && collectorRatingRequestId && (
+        <RateClientScreen
+          requestId={collectorRatingRequestId}
+          onBack={() => setCollectorScreen('home')}
+          onSessionExpired={handleSessionExpired}
+          onSubmitted={() => {
+            setCollectorRatingRequestId(null);
             setCollectorScreen('home');
           }}
         />
       )}
+
       {phase === 'collector_app' && collectorScreen === 'wallet' && (
         <WalletScreen role="collector" onBack={() => setCollectorScreen('home')} onSessionExpired={handleSessionExpired} />
       )}
@@ -217,3 +247,15 @@ const styles = StyleSheet.create({
   safeAreaSplash: { backgroundColor: '#059669' },
   safeAreaRoleSelection: { backgroundColor: '#f0fdf4' },
 });
+
+
+
+
+
+
+
+
+
+
+
+

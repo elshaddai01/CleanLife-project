@@ -5,7 +5,7 @@ import { pickupApi, locationApi, ApiError } from '../../apiClient';
 type Props = {
   requestId: number;
   onBack: () => void;
-  onSessionExpired: () => void;
+  onSessionExpired: () => void;  onRateCollector: () => void;
 };
 
 type Stage = {
@@ -17,7 +17,7 @@ type Stage = {
 const POLL_INTERVAL_MS = 5000;
 const LOCATION_POLL_INTERVAL_MS = 15000;
 
-export default function TrackPickupScreen({ requestId, onBack, onSessionExpired }: Props) {
+export default function TrackPickupScreen({ requestId, onBack, onSessionExpired, onRateCollector }: Props) {
   const [status, setStatus] = useState<Awaited<ReturnType<typeof pickupApi.getStatus>> | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -65,8 +65,6 @@ export default function TrackPickupScreen({ requestId, onBack, onSessionExpired 
           });
         }
       } catch {
-        // No location yet, or collector hasn't sent one — not an error the
-        // client needs to see, the tracker screen just omits the map pin.
         if (!cancelled) setCollectorLocation(null);
       }
     }
@@ -135,6 +133,12 @@ export default function TrackPickupScreen({ requestId, onBack, onSessionExpired 
             Payment: {status.payment_status === 'COMPLETED' ? 'Released ✅' : 'Pending completion'}
           </Text>
 
+          {status.routing_status === 'completed' && (
+            <Pressable style={styles.rateButton} onPress={onRateCollector}>
+              <Text style={styles.rateButtonText}>? Rate Collector</Text>
+            </Pressable>
+          )}
+
           <Text style={styles.autoRefreshNote}>Auto-refreshing every 5 seconds…</Text>
         </>
       )}
@@ -167,5 +171,19 @@ const styles = StyleSheet.create({
   stageText: { fontSize: 14, color: '#94a3b8' },
   stageTextDone: { color: '#1e293b', fontWeight: '700' },
   paymentStatus: { marginTop: 16, fontSize: 14, fontWeight: '700', color: '#1e293b' },
+  rateButton: {
+    backgroundColor: '#059669',
+    borderRadius: 12,
+    paddingVertical: 14,
+    alignItems: 'center',
+    marginTop: 20,
+  },
+  rateButtonText: {
+    color: '#fff',
+    fontWeight: '900',
+    fontSize: 16,
+  },
   autoRefreshNote: { marginTop: 20, fontSize: 11, color: '#94a3b8', textAlign: 'center' },
 });
+
+

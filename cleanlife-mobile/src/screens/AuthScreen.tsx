@@ -1,3 +1,4 @@
+
 import React, { useState } from 'react';
 import {
   View,
@@ -31,65 +32,70 @@ export default function AuthScreen({ initialRole, onAuthenticated, onBack }: Pro
   const [companyCode, setCompanyCode] = useState('');
   const [loading, setLoading] = useState(false);
 
+  // ============================================================
+  // ✅ UPDATED handleSubmit function for unified JWT authentication
+  // ============================================================
   const handleSubmit = async () => {
+    // Validation
     if (password.length < 8) {
       Alert.alert('Invalid password', 'Password must be at least 8 characters.');
       return;
     }
-
-    if (mode === 'register') {
-      if (!name.trim() || !email.trim() || !phone.trim()) {
-        Alert.alert('Missing details', 'Name, email, and phone number are required for registration.');
-        return;
-      }
-      if (!email.includes('@')) {
-        Alert.alert('Invalid email', 'Please enter a valid email address.');
-        return;
-      }
-      // For collector registration, username is also required
-      if (role === 'collector' && !username.trim()) {
-        Alert.alert('Missing username', 'Username is required.');
-        return;
-      }
-    } else {
-      if (role === 'client' && !phone.trim()) {
-        Alert.alert('Missing phone number', 'Phone number is required.');
-        return;
-      }
-      if (role === 'collector' && !username.trim()) {
-        Alert.alert('Missing username', 'Username is required.');
-        return;
-      }
+    if (role === 'client' && (!phone.trim() || (mode === 'register' && !name.trim()))) {
+      Alert.alert('Missing details', mode === 'register' ? 'Name and phone number are required.' : 'Phone number is required.');
+      return;
     }
-
+    if (role === 'collector' && !username.trim()) {
+      Alert.alert('Missing username', 'Username is required.');
+      return;
+    }
+    
     setLoading(true);
     try {
       if (role === 'client') {
+        // Register client if in register mode
         if (mode === 'register') {
           await authApi.registerClient({
-            name,
-            email,
-            phone_number: phone,
+            name: name.trim(),
+            email: email.trim(),
+            phone_number: phone.trim(),
             password,
-            company_code: companyCode || undefined,
+            company_code: companyCode.trim() || undefined,
           });
         }
-        const result = await authApi.loginClient(phone, password);
-        await setSession(result.token, 'client', result.client.id);
+        
+        // ✅ UNIFIED LOGIN - Works for clients
+        const result = await authApi.loginClient(phone.trim(), password);
+        
+        // ✅ Store session with access token, refresh token, and user data
+await setSession(
+  result.token,
+  'client',
+  result.client.id,
+  result.client,
+  result.refreshToken
+);
         onAuthenticated('client');
       } else {
+        // Register collector if in register mode
         if (mode === 'register') {
-          // Correct mapping: username → username, name → name
           await authApi.registerCollector({
-            username,
+            username: username.trim(),
             password,
-            name,
-            email,
-            phone_number: phone,
           });
         }
-        const result = await authApi.loginCollector(username, password);
-        await setSession(result.token, 'collector', result.collector.id);
+        
+        // ✅ UNIFIED LOGIN - Works for collectors
+        const result = await authApi.loginCollector(username.trim(), password);
+        
+        // ✅ Store session with access token, refresh token, and user data
+        await setSession(
+          result.token,    // Access token
+          'collector',                   // Role
+          result.collector.id,
+          result.collector,
+          result.refreshToken
+        );
         onAuthenticated('collector');
       }
     } catch (err) {
@@ -130,7 +136,12 @@ export default function AuthScreen({ initialRole, onAuthenticated, onBack }: Pro
           <>
             {mode === 'register' && (
               <>
-                <TextInput style={styles.input} placeholder="Full Name" value={name} onChangeText={setName} />
+                <TextInput
+                  style={styles.input}
+                  placeholder="Name"
+                  value={name}
+                  onChangeText={setName}
+                />
                 <TextInput
                   style={styles.input}
                   placeholder="Email"
@@ -139,65 +150,30 @@ export default function AuthScreen({ initialRole, onAuthenticated, onBack }: Pro
                   keyboardType="email-address"
                   autoCapitalize="none"
                 />
-                <TextInput
-                  style={styles.input}
-                  placeholder="Phone number"
-                  value={phone}
-                  onChangeText={setPhone}
-                  keyboardType="phone-pad"
-                />
-                <TextInput
-                  style={styles.input}
-                  placeholder="Company code (optional)"
-                  value={companyCode}
-                  onChangeText={setCompanyCode}
-                />
               </>
             )}
-            {mode === 'login' && (
+
+            <TextInput
+              style={styles.input}
+              placeholder="Phone number"
+              value={phone}
+              onChangeText={setPhone}
+              keyboardType="phone-pad"
+            />
+
+            {mode === 'register' && (
               <TextInput
                 style={styles.input}
-                placeholder="Phone number"
-                value={phone}
-                onChangeText={setPhone}
-                keyboardType="phone-pad"
+                placeholder="Company code (optional)"
+                value={companyCode}
+                onChangeText={setCompanyCode}
               />
             )}
           </>
         ) : (
-          // Collector
-          <>
-            {mode === 'register' && (
-              <>
-                <TextInput style={styles.input} placeholder="Full Name" value={name} onChangeText={setName} />
-                <TextInput
-                  style={styles.input}
-                  placeholder="Email"
-                  value={email}
-                  onChangeText={setEmail}
-                  keyboardType="email-address"
-                  autoCapitalize="none"
-                />
-                <TextInput
-                  style={styles.input}
-                  placeholder="Phone number"
-                  value={phone}
-                  onChangeText={setPhone}
-                  keyboardType="phone-pad"
-                />
-                <TextInput
-                  style={styles.input}
-                  placeholder="Username"
-                  value={username}
-                  onChangeText={setUsername}
-                />
-              </>
-            )}
-            {mode === 'login' && (
-              <TextInput style={styles.input} placeholder="Username" value={username} onChangeText={setUsername} />
-            )}
-          </>
+          <TextInput style={styles.input} placeholder="Username" value={username} onChangeText={setUsername} />
         )}
+
 
         <TextInput
           style={styles.input}
@@ -250,3 +226,14 @@ const styles = StyleSheet.create({
   },
   submitText: { color: '#fff', fontWeight: '700', fontSize: 16 },
 });
+
+
+
+
+
+
+
+
+
+
+

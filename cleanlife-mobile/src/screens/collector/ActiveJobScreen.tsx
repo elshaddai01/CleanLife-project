@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import {
   View,
   Text,
@@ -11,7 +11,8 @@ import {
 } from 'react-native';
 import * as Location from 'expo-location';
 import * as ImagePicker from 'expo-image-picker';
-import { pickupApi, uploadApi, locationApi, ApiError } from '../../apiClient';
+import { pickupApi, uploadApi, ApiError, telemetryApi, ratingsApi } from '../../apiClient';
+import { AppState } from 'react-native';
 
 type Props = {
   requestId: number;
@@ -19,13 +20,6 @@ type Props = {
   onCompleted: () => void;
   onSessionExpired: () => void;
 };
-
-// [LOC-04] Foreground-only, throttled while this screen is open AND a job
-// is assigned. Stops the moment the screen unmounts or the job completes —
-// never runs as a background service. 20s interval keeps data/battery use
-// far under the SRS 5 budgets (50MB/month, 8%/hour) since it only runs for
-// the duration of one active job, not continuously.
-const LOCATION_UPDATE_INTERVAL_MS = 20000;
 
 export default function ActiveJobScreen({ requestId, onBack, onCompleted, onSessionExpired }: Props) {
   const [status, setStatus] = useState<Awaited<ReturnType<typeof pickupApi.getStatus>> | null>(null);
@@ -37,7 +31,6 @@ export default function ActiveJobScreen({ requestId, onBack, onCompleted, onSess
   const [lat, setLat] = useState<number | null>(null);
   const [lng, setLng] = useState<number | null>(null);
   const [locating, setLocating] = useState(false);
-  const [locationSharing, setLocationSharing] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -60,41 +53,62 @@ export default function ActiveJobScreen({ requestId, onBack, onCompleted, onSess
     const timer = setInterval(load, 5000);
     return () => clearInterval(timer);
   }, [load]);
-
-  // [LOC-05] Send this collector's foreground GPS position periodically
-  // while the job is 'assigned', so the client can see them approaching.
-  // Stops automatically on unmount (job completed / navigated away).
-  const locationTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
-
   useEffect(() => {
-    const isActive = status?.routing_status === 'assigned';
+  let subscription: Location.LocationSubscription | null = null;
+  let mounted = true;
 
-    async function sendOnce() {
-      try {
-        const { status: permStatus } = await Location.getForegroundPermissionsAsync();
-        if (permStatus !== 'granted') return;
-        const position = await Location.getCurrentPositionAsync({});
-        await locationApi.updateMyLocation(position.coords.latitude, position.coords.longitude);
-        setLocationSharing(true);
-      } catch (err) {
-        // Non-fatal — a missed location ping shouldn't interrupt the job flow.
-        console.warn('location update failed', err);
+  const startTracking = async () => {
+    try {
+      const { status } =
+        await Location.requestForegroundPermissionsAsync();
+
+      if (status !== 'granted') {
+        console.warn('Location permission not granted');
+        return;
       }
-    }
 
-    if (isActive) {
-      void sendOnce();
-      locationTimerRef.current = setInterval(sendOnce, LOCATION_UPDATE_INTERVAL_MS);
-    }
+      subscription = await Location.watchPositionAsync(
+        {
+          accuracy: Location.Accuracy.Balanced,
+          timeInterval: 5000,
+          distanceInterval: 10,
+        },
+        async (location) => {
+          if (!mounted) return;
 
-    return () => {
-      if (locationTimerRef.current) {
-        clearInterval(locationTimerRef.current);
-        locationTimerRef.current = null;
-      }
-      setLocationSharing(false);
-    };
-  }, [status?.routing_status]);
+          const { latitude, longitude } = location.coords;
+
+          try {
+            await telemetryApi.updateLocation(
+              latitude,
+              longitude
+            );
+          } catch (err) {
+            console.warn(
+              'Live location update failed',
+              err
+            );
+          }
+        }
+      );
+    } catch (err) {
+      console.warn(
+        'Could not start live location tracking',
+        err
+      );
+    }
+  };
+
+  void startTracking();
+
+  return () => {
+    mounted = false;
+
+    if (subscription) {
+      subscription.remove();
+    }
+  };
+}, [requestId]);
 
   const handleArrive = async () => {
     setBusy('arrive');
@@ -221,9 +235,6 @@ export default function ActiveJobScreen({ requestId, onBack, onCompleted, onSess
       </Pressable>
       <Text style={styles.title}>Job #{requestId}</Text>
       <Text style={styles.subtitle}>Status: {status.routing_status.replace('_', ' ')}</Text>
-      {locationSharing && !arrived && (
-        <Text style={styles.locationNote}>📍 Sharing your location with the client</Text>
-      )}
 
       {!arrived && (
         <Pressable style={styles.actionButton} onPress={handleArrive} disabled={busy === 'arrive'}>
@@ -295,8 +306,7 @@ const styles = StyleSheet.create({
   backButton: { marginBottom: 12 },
   backText: { color: '#0891b2', fontWeight: '700', fontSize: 14 },
   title: { fontSize: 22, fontWeight: '900', color: '#0e7490' },
-  subtitle: { fontSize: 13, color: '#64748b', marginBottom: 4, textTransform: 'capitalize' },
-  locationNote: { fontSize: 12, color: '#059669', fontWeight: '700', marginBottom: 16 },
+  subtitle: { fontSize: 13, color: '#64748b', marginBottom: 20, textTransform: 'capitalize' },
   actionButton: { backgroundColor: '#0891b2', borderRadius: 12, paddingVertical: 14, alignItems: 'center', marginBottom: 8 },
   actionText: { color: '#fff', fontWeight: '800' },
   section: { marginTop: 12, backgroundColor: '#fff', borderRadius: 14, padding: 16, borderWidth: 1, borderColor: '#e2e8f0' },
@@ -317,3 +327,5 @@ const styles = StyleSheet.create({
   submitText: { color: '#fff', fontWeight: '800' },
   buttonDisabled: { backgroundColor: '#94a3b8' },
 });
+
+
