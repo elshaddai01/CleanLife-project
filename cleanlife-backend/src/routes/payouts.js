@@ -70,4 +70,32 @@ router.get('/company-balance', requireAuth, requireRole(['company_admin', 'super
     }
 });
 
+// GET /admin/payouts/company-transactions — the company wallet's ledger:
+// job_earnings credits (routed here by process_escrow_release for corporate
+// collectors) and payout debits (from this router's POST /), so the admin
+// can see what's accumulated and what's already gone out.
+router.get('/company-transactions', requireAuth, requireRole(['company_admin', 'super_admin']), async (req, res) => {
+    const companyId = req.collector.role === 'super_admin'
+        ? positiveInteger(req.query.company_id)
+        : req.collector.company_id;
+
+    if (!companyId) {
+        return res.status(400).json({ error: 'company_id is required' });
+    }
+
+    try {
+        const result = await pool.query(
+            `SELECT id, type, amount, description, reference_pickup_request_id, created_at
+             FROM wallet_transactions
+             WHERE owner_type = 'company' AND owner_id = $1
+             ORDER BY created_at DESC
+             LIMIT 200`,
+            [companyId]
+        );
+        return res.json(result.rows);
+    } catch (error) {
+        return handleDbError(error, res, 'company transaction history lookup');
+    }
+});
+
 module.exports = router;

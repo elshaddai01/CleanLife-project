@@ -6,9 +6,17 @@ const config = require('../config/env');
 const { handleDbError } = require('../utils/dbErrors');
 const { verifyDisposal } = require('../services/proofOfWorkVerification');
 const { sendPushNotification } = require('../utils/pushService');
+const pawapay = require('../services/pawapay');
 
 const router = express.Router();
 
+// [MOMO-05] Collector marks arrival. For MoMo requests, this is now where
+// a REAL pawaPay Request-to-Pay prompt is sent to the client's phone —
+// replaces the earlier SIMULATED console.log placeholder. If pawaPay
+// itself fails to send (bad token, client's phone number invalid, pawaPay
+// service down), the arrival confirmation still succeeds — a payment
+// hiccup should never block the collector from continuing their job; the
+// client can still be prompted again later if needed.
 router.post('/:id/arrive', requireAuth, requireRole('collector'), async (req, res) => {
     const requestId = positiveInteger(req.params.id);
     if (!requestId) return res.status(400).json({ error: 'invalid pickup request id' });
@@ -23,10 +31,40 @@ router.post('/:id/arrive', requireAuth, requireRole('collector'), async (req, re
         const row = result.rows[0];
 
         if (row.payment_method === 'MOMO') {
-            console.log(`[momo] SIMULATED Request-to-Pay push sent for request ${requestId}`);
+            try {
+                const clientLookup = await pool.query(
+                    `SELECT phone_number, estimated_price_fcfa FROM clients c
+                     JOIN pickup_requests pr ON pr.client_id = c.id
+                     WHERE pr.id = $1`,
+                    [requestId]
+                );
+                const clientRow = clientLookup.rows[0];
+                if (clientRow?.phone_number) {
+                    const payment = await pawapay.initiatePayment({
+                        phoneNumber: clientRow.phone_number,
+                        amount: clientRow.estimated_price_fcfa || 0,
+                    });
+                    await pool.query(
+                        'SELECT * FROM store_momo_deposit_id($1, $2, $3)',
+                        [requestId, req.collector.sub, payment.depositId]
+                    );
+                    if (payment.status === 'ACCEPTED') {
+                        console.log(`[momo] Real Request-to-Pay sent for request ${requestId}, depositId=${payment.depositId}`);
+                    } else {
+                        console.error(
+                            `[momo] Deposit not accepted for request ${requestId}, depositId=${payment.depositId}, status=${payment.status}`,
+                            payment.failureReason || ''
+                        );
+                    }
+                } else {
+                    console.warn(`[momo] Client has no phone_number on file for request ${requestId} — cannot send Request-to-Pay.`);
+                }
+            } catch (momoError) {
+                // Non-fatal — the arrival itself already succeeded above.
+                console.error(`[momo] Failed to initiate real payment for request ${requestId}:`, momoError.message);
+            }
         }
 
-        // [NOTIF-05] Real push — notify the client their collector has arrived.
         const clientLookup = await pool.query(
             'SELECT push_token FROM clients WHERE id = (SELECT client_id FROM pickup_requests WHERE id = $1)',
             [requestId]
@@ -86,10 +124,7 @@ router.post('/momo/webhook', async (req, res) => {
 
 // [POW-06] Proof-of-work submission — the ONLY action that completes a
 // request and releases escrow (SRS 3.4), regardless of payment method.
-// [FLOW-03] As of migration 035, insert_proof_of_work now ALSO requires
-// payment to already be confirmed (cash_collected_at or momo_confirmed_at)
-// — enforced in the database, so a request with unconfirmed MoMo payment
-// will be rejected here with a 409, same as any other ownership failure.
+// insert_proof_of_work (migration 035) requires payment already confirmed.
 // Body: { photo_storage_url, exif_latitude?, exif_longitude?, bin_code? }
 router.post('/:id/proof-of-work', requireAuth, requireRole('collector'), async (req, res) => {
     const requestId = positiveInteger(req.params.id);
@@ -153,11 +188,6 @@ router.post('/:id/proof-of-work', requireAuth, requireRole('collector'), async (
             );
             if (completed.rows.length === 0) throw new Error('pickup request could not be completed');
 
-            // [PAYOUT-04] process_escrow_release decides where the money
-            // goes: the collector's COMPANY wallet if corporate, or the
-            // collector directly if independent (existing behavior,
-            // unchanged for that case). Replaces the old direct
-            // create_wallet_transaction call.
             let walletCredit = null;
             const price = completed.rows[0].estimated_price_fcfa;
             if (price && Number(price) > 0) {

@@ -6,6 +6,7 @@ const { handleDbError } = require('../utils/dbErrors');
 const { evaluateMobility } = require('../services/mobilityEvaluation');
 const { scheduleAdminHoldExpiry, scheduleCascade, cancelPendingJobs } = require('../queues/dispatchQueue');
 const { sendPushNotification } = require('../utils/pushService');
+const pawapay = require('../services/pawapay');
 
 const router = express.Router();
 
@@ -64,6 +65,25 @@ router.post('/', requireAuth, requireRole('client'), async (req, res) => {
 
         if (isCorporate) {
             await scheduleAdminHoldExpiry(created.id);
+
+            // [NOTIF-08] Notify every corporate collector at this client's
+            // company the instant the job is created — previously the job
+            // sat silently in the private queue with no alert at all.
+            // Fire-and-forget per collector; a push failure for one
+            // collector must never block the others or the request itself.
+            const companyCollectors = await pool.query(
+                `SELECT push_token FROM collectors
+                 WHERE company_id = $1 AND collector_type = 'corporate' AND push_token IS NOT NULL`,
+                [client.company_id]
+            );
+            for (const row of companyCollectors.rows) {
+                void sendPushNotification(
+                    row.push_token,
+                    'New job for your company',
+                    `${bagCount} bag${bagCount > 1 ? 's' : ''} of ${waste_type.toLowerCase()} waste — tap to accept.`,
+                    { pickup_request_id: created.id }
+                );
+            }
         } else {
             await scheduleCascade(created.id);
         }
@@ -125,14 +145,26 @@ router.post('/:id/assign', requireAdminKey, async (req, res) => {
     }
 });
 
+// [DISP-05/10] Unified claim endpoint — tries the public-broadcast path
+// first (claim_pickup_request), then the corporate self-claim path
+// (claim_corporate_pickup_request, migration 030) if the first finds
+// nothing. This lets the mobile app use ONE claim button/call regardless
+// of whether the job is a public broadcast_public row or the collector's
+// own company's private searching_corporate row — the collector doesn't
+// need to know which type it is.
 router.post('/:id/claim', requireAuth, requireRole('collector'), async (req, res) => {
     const requestId = positiveInteger(req.params.id);
     if (!requestId) return res.status(400).json({ error: 'invalid pickup request id' });
 
     try {
-        const result = await pool.query('SELECT * FROM claim_pickup_request($1, $2)', [requestId, req.collector.sub]);
+        let result = await pool.query('SELECT * FROM claim_pickup_request($1, $2)', [requestId, req.collector.sub]);
+
         if (result.rows.length === 0) {
-            return res.status(409).json({ error: 'request already claimed, not public, or does not exist' });
+            result = await pool.query('SELECT * FROM claim_corporate_pickup_request($1, $2)', [requestId, req.collector.sub]);
+        }
+
+        if (result.rows.length === 0) {
+            return res.status(409).json({ error: 'request already claimed, not available to you, or does not exist' });
         }
         await cancelPendingJobs(requestId);
 
@@ -155,11 +187,43 @@ router.post('/:id/claim', requireAuth, requireRole('collector'), async (req, res
     }
 });
 
+// [MOMO-10] This used to trust the client's tap alone (client_confirm_momo_payment
+// called directly, no check against pawaPay) — a "demo" gate per migration 035's
+// own comment, never upgraded once real pawaPay integration landed. Migration 041
+// added momo_deposit_id storage + get_momo_deposit_id_for_request specifically so
+// this route could look up the real pawaPay transaction and verify it before
+// confirming — that lookup existed but was never wired in until now. Real pawaPay
+// status now gates the confirmation: only a genuine COMPLETED deposit lets the
+// collector proceed to proof-of-work.
 router.post('/:id/confirm-payment', requireAuth, requireRole('client'), async (req, res) => {
     const requestId = positiveInteger(req.params.id);
     if (!requestId) return res.status(400).json({ error: 'invalid pickup request id' });
 
     try {
+        const depositLookup = await pool.query(
+            'SELECT * FROM get_momo_deposit_id_for_request($1, $2)',
+            [requestId, req.collector.sub]
+        );
+        const depositRow = depositLookup.rows[0];
+        if (!depositRow || !depositRow.momo_deposit_id) {
+            return res.status(409).json({ error: 'no MoMo payment has been initiated for this request yet' });
+        }
+
+        let paymentStatus;
+        try {
+            paymentStatus = await pawapay.getPaymentStatus(depositRow.momo_deposit_id);
+        } catch (pawapayError) {
+            console.error(`[momo] Status check failed for request ${requestId}:`, pawapayError.message);
+            return res.status(502).json({ error: 'could not reach pawaPay to verify payment status — please try again shortly' });
+        }
+
+        if (paymentStatus.status === 'FAILED') {
+            return res.status(422).json({ error: 'the MoMo payment was not completed', pawapay_status: paymentStatus.status });
+        }
+        if (paymentStatus.status !== 'COMPLETED') {
+            return res.status(202).json({ error: 'payment is still processing — please wait and try again', pawapay_status: paymentStatus.status });
+        }
+
         const result = await pool.query(
             'SELECT * FROM client_confirm_momo_payment($1, $2)',
             [requestId, req.collector.sub]
@@ -181,7 +245,7 @@ router.post('/:id/confirm-payment', requireAuth, requireRole('client'), async (r
             }
         }
 
-        return res.json({ id: row.id, momo_confirmed_at: row.momo_confirmed_at });
+        return res.json({ status: 'completed', id: row.id, momo_confirmed_at: row.momo_confirmed_at });
     } catch (err) {
         return handleDbError(err, res, 'payment confirmation');
     }
@@ -195,10 +259,12 @@ router.get('/available', requireAuth, requireRole('collector'), async (req, res)
         const rows = await withTenant(company_id, async (client) => {
             if (collector_type === 'corporate') {
                 const result = await client.query(
-                    `SELECT id, client_id, bag_count, waste_type, mobility_type_id, routing_status, created_at
+                    `SELECT id, client_id, bag_count, waste_type, mobility_type_id, routing_status, current_stage_rank, created_at
                      FROM pickup_requests
-                     WHERE routing_status = 'searching_corporate' AND collector_id IS NULL
-                     ORDER BY created_at ASC`
+                     WHERE (routing_status = 'searching_corporate' AND collector_id IS NULL)
+                        OR (routing_status = 'broadcast_public' AND collector_id IS NULL AND current_stage_rank >= $1)
+                     ORDER BY created_at ASC`,
+                    [myRank]
                 );
                 return result.rows;
             }

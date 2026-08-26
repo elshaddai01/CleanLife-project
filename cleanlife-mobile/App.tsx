@@ -8,6 +8,7 @@ import BottomTabBar, { TabKey } from './src/components/BottomTabBar';
 import SplashScreen from './src/screens/SplashScreen';
 import RoleSelectionScreen from './src/screens/RoleSelectionScreen';
 import AuthScreen from './src/screens/AuthScreen';
+import PasswordResetScreen from './src/screens/PasswordResetScreen';
 
 import ClientHomeScreen from './src/screens/client/ClientHomeScreen';
 import RequestPickupScreen from './src/screens/client/RequestPickupScreen';
@@ -23,7 +24,7 @@ import SettingsScreen from './src/screens/shared/SettingsScreen';
 
 import { LanguageProvider } from './src/i18n/LanguageContext';
 
-type Phase = 'checking' | 'splash' | 'role_select' | 'auth' | 'client_app' | 'collector_app';
+type Phase = 'checking' | 'splash' | 'role_select' | 'auth' | 'password_reset' | 'client_app' | 'collector_app';
 
 // 'profile' now renders SettingsScreen (hub) instead of the profile
 // screens directly — those live inside SettingsScreen to avoid duplication.
@@ -143,6 +144,14 @@ export default function App() {
                 setRole(r);
                 setPhase(r === 'client' ? 'client_app' : 'collector_app');
               }}
+              onForgotPassword={() => setPhase('password_reset')}
+            />
+          )}
+
+          {phase === 'password_reset' && (
+            <PasswordResetScreen
+              onBack={() => setPhase('auth')}
+              onComplete={() => setPhase('auth')}
             />
           )}
 

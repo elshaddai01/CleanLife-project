@@ -30,6 +30,7 @@
     <nav class="tabs">
       <button class="tab-btn active" data-tab="collectors">Collectors & KYC</button>
       <button class="tab-btn" data-tab="create">Create collector</button>
+      <button class="tab-btn" data-tab="wallet">Wallet</button>
     </nav>
 
     <section id="tab-collectors" class="tab-panel">
@@ -52,6 +53,48 @@
         <button id="create-collector">Create collector account</button>
       </div>
       <p id="create-result"></p>
+    </section>
+
+    <section id="tab-wallet" class="tab-panel hidden">
+      <h2>Company wallet</h2>
+      <p class="hint">
+        Job earnings for your corporate collectors land here first, not directly in their
+        own account. Use "Send to collector" below to release funds to a specific driver
+        whenever you're ready — they'll see it added to their balance on the app.
+      </p>
+
+      <div class="card wallet-balance-card">
+        <div>
+          <div class="wallet-balance-label">Company balance</div>
+          <div id="company-balance" class="wallet-balance-value">—</div>
+        </div>
+        <button id="refresh-wallet">Refresh</button>
+      </div>
+
+      <h3>Send to collector</h3>
+      <div class="form-row">
+        <select id="payout-collector"></select>
+        <input id="payout-amount" type="number" min="1" step="1" placeholder="Amount (FCFA)" />
+        <input id="payout-description" placeholder="Description (optional)" />
+        <button id="send-payout">Send</button>
+      </div>
+      <p id="payout-result"></p>
+
+      <h3>Collector balances</h3>
+      <table id="collector-balances-table">
+        <thead>
+          <tr><th>Collector</th><th>Balance (FCFA)</th></tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+
+      <h3>Company wallet history</h3>
+      <table id="company-transactions-table">
+        <thead>
+          <tr><th>Date</th><th>Type</th><th>Amount (FCFA)</th><th>Description</th></tr>
+        </thead>
+        <tbody></tbody>
+      </table>
     </section>
   </div>
 

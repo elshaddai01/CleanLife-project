@@ -18,6 +18,7 @@ type Props = {
   initialRole: 'client' | 'collector';
   onAuthenticated: (role: 'client' | 'collector') => void;
   onBack: () => void;
+  onForgotPassword: () => void;
 };
 
 // [NOTIF-07] Fire-and-forget — a failed push registration must never
@@ -32,9 +33,10 @@ function registerPushTokenInBackground() {
     });
 }
 
-export default function AuthScreen({ initialRole, onAuthenticated, onBack }: Props) {
+export default function AuthScreen({ initialRole, onAuthenticated, onBack, onForgotPassword }: Props) {
   const [role, setRole] = useState<'client' | 'collector'>(initialRole);
   const [mode, setMode] = useState<'login' | 'register'>('login');
+  const [step, setStep] = useState<'form' | 'verify_email'>('form');
 
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
@@ -44,18 +46,63 @@ export default function AuthScreen({ initialRole, onAuthenticated, onBack }: Pro
   const [companyCode, setCompanyCode] = useState('');
   const [loading, setLoading] = useState(false);
 
+  const [emailCode, setEmailCode] = useState('');
+  const [verifying, setVerifying] = useState(false);
+  const [resending, setResending] = useState(false);
+
+  const finishClientLogin = async () => {
+    const result = await authApi.loginClient(email, password);
+    await setSession(result.token, 'client', result.client.id, result.client, result.refreshToken);
+    registerPushTokenInBackground();
+    onAuthenticated('client');
+  };
+
+  const handleVerifyEmail = async () => {
+    if (emailCode.length !== 6) {
+      Alert.alert('Invalid code', 'Enter the 6-digit code sent to your email.');
+      return;
+    }
+    setVerifying(true);
+    try {
+      await authApi.verifyEmail(email, emailCode);
+      await finishClientLogin();
+    } catch (err) {
+      const message = err instanceof ApiError ? `[${err.status}] ${err.message}` : String(err);
+      Alert.alert('Verification failed', message);
+    } finally {
+      setVerifying(false);
+    }
+  };
+
+  const handleResendCode = async () => {
+    if (!email.trim()) {
+      Alert.alert('Email required', 'Enter your email address first.');
+      return;
+    }
+    setResending(true);
+    try {
+      const result = await authApi.resendEmailCode(email.trim());
+      Alert.alert(result.email_delivered ? 'Code sent' : 'Could not send email', result.message);
+    } catch (err) {
+      const message = err instanceof ApiError ? `[${err.status}] ${err.message}` : String(err);
+      Alert.alert('Could not resend code', message);
+    } finally {
+      setResending(false);
+    }
+  };
+
   const handleSubmit = async () => {
     if (password.length < 8) {
       Alert.alert('Invalid password', 'Password must be at least 8 characters.');
       return;
     }
     if (role === 'client') {
-      if (!phone.trim()) {
-        Alert.alert('Missing details', 'Phone number is required.');
+      if (!email.trim()) {
+        Alert.alert('Missing details', 'Email is required.');
         return;
       }
-      if (mode === 'register' && (!name.trim() || !email.trim())) {
-        Alert.alert('Missing details', 'Name and email are required to register.');
+      if (mode === 'register' && (!name.trim() || !phone.trim())) {
+        Alert.alert('Missing details', 'Name and phone number are required to register.');
         return;
       }
     }
@@ -68,18 +115,25 @@ export default function AuthScreen({ initialRole, onAuthenticated, onBack }: Pro
     try {
       if (role === 'client') {
         if (mode === 'register') {
-          await authApi.registerClient({
+          const result = await authApi.registerClient({
             name,
             email,
             phone_number: phone,
             password,
             company_code: companyCode || undefined,
           });
+          setStep('verify_email');
+          if (!result.email_delivered) {
+            Alert.alert(
+              'Registration successful',
+              'We could not send the verification email right now. Use "Resend code" once your email is working, or contact support.'
+            );
+          } else {
+            Alert.alert('Check your email', `We sent a 6-digit verification code to ${email}.`);
+          }
+          return;
         }
-        const result = await authApi.loginClient(phone, password);
-        await setSession(result.token, 'client', result.client.id, result.client, result.refreshToken);
-        registerPushTokenInBackground();
-        onAuthenticated('client');
+        await finishClientLogin();
       } else {
         if (mode === 'register') {
           await authApi.registerCollector({ username, password });
@@ -90,12 +144,56 @@ export default function AuthScreen({ initialRole, onAuthenticated, onBack }: Pro
         onAuthenticated('collector');
       }
     } catch (err) {
+      if (err instanceof ApiError && err.code === 'EMAIL_NOT_VERIFIED') {
+        setStep('verify_email');
+        Alert.alert('Email not verified', 'Enter your email below to get a new code, then verify to finish logging in.');
+        return;
+      }
       const message = err instanceof ApiError ? `[${err.status}] ${err.message}` : String(err);
       Alert.alert(mode === 'register' ? 'Registration failed' : 'Login failed', message);
     } finally {
       setLoading(false);
     }
   };
+
+  if (step === 'verify_email') {
+    return (
+      <KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+        <ScrollView contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled">
+          <Pressable onPress={() => setStep('form')} style={styles.backButton}>
+            <Text style={styles.backText}>← Back</Text>
+          </Pressable>
+          <Text style={styles.title}>Verify your email</Text>
+          <Text style={styles.subtitle}>Enter the 6-digit code sent to your email address.</Text>
+
+          <TextInput
+            style={styles.input}
+            placeholder="Email"
+            value={email}
+            onChangeText={setEmail}
+            autoCapitalize="none"
+            keyboardType="email-address"
+          />
+          <TextInput
+            style={styles.input}
+            placeholder="6-digit code"
+            value={emailCode}
+            onChangeText={(v) => setEmailCode(v.replace(/\D/g, '').slice(0, 6))}
+            keyboardType="number-pad"
+            maxLength={6}
+          />
+
+          <Pressable style={styles.submitButton} onPress={handleVerifyEmail} disabled={verifying}>
+            {verifying ? <ActivityIndicator color="#fff" /> : <Text style={styles.submitText}>Verify</Text>}
+          </Pressable>
+
+          <Pressable onPress={handleResendCode} disabled={resending} style={styles.linkButton}>
+            <Text style={styles.linkText}>{resending ? 'Sending…' : 'Resend code'}</Text>
+          </Pressable>
+        </ScrollView>
+      </KeyboardAvoidingView>
+    );
+  }
 
   return (
     <KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
@@ -126,32 +224,32 @@ export default function AuthScreen({ initialRole, onAuthenticated, onBack }: Pro
         {role === 'client' ? (
           <>
             {mode === 'register' && (
-              <>
-                <TextInput style={styles.input} placeholder="Name" value={name} onChangeText={setName} />
-                <TextInput
-                  style={styles.input}
-                  placeholder="Email"
-                  value={email}
-                  onChangeText={setEmail}
-                  autoCapitalize="none"
-                  keyboardType="email-address"
-                />
-              </>
+              <TextInput style={styles.input} placeholder="Name" value={name} onChangeText={setName} />
             )}
             <TextInput
               style={styles.input}
-              placeholder="Phone number"
-              value={phone}
-              onChangeText={setPhone}
-              keyboardType="phone-pad"
+              placeholder="Email"
+              value={email}
+              onChangeText={setEmail}
+              autoCapitalize="none"
+              keyboardType="email-address"
             />
             {mode === 'register' && (
-              <TextInput
-                style={styles.input}
-                placeholder="Company code (optional)"
-                value={companyCode}
-                onChangeText={setCompanyCode}
-              />
+              <>
+                <TextInput
+                  style={styles.input}
+                  placeholder="Phone number"
+                  value={phone}
+                  onChangeText={setPhone}
+                  keyboardType="phone-pad"
+                />
+                <TextInput
+                  style={styles.input}
+                  placeholder="Company code (optional)"
+                  value={companyCode}
+                  onChangeText={setCompanyCode}
+                />
+              </>
             )}
           </>
         ) : (
@@ -173,6 +271,12 @@ export default function AuthScreen({ initialRole, onAuthenticated, onBack }: Pro
             <Text style={styles.submitText}>{mode === 'register' ? 'Register & log in' : 'Log in'}</Text>
           )}
         </Pressable>
+
+        {role === 'client' && mode === 'login' && (
+          <Pressable onPress={onForgotPassword} style={styles.linkButton}>
+            <Text style={styles.linkText}>Forgot password?</Text>
+          </Pressable>
+        )}
       </ScrollView>
     </KeyboardAvoidingView>
   );
@@ -208,4 +312,6 @@ const styles = StyleSheet.create({
     marginTop: 8,
   },
   submitText: { color: '#fff', fontWeight: '700', fontSize: 16 },
+  linkButton: { marginTop: 16, alignItems: 'center' },
+  linkText: { color: '#059669', fontWeight: '700', fontSize: 13 },
 });

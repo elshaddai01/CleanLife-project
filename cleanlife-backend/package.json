@@ -10,11 +10,14 @@
     "check": "node --check app.js && node scripts/check-source.js"
   },
   "dependencies": {
+    "axios": "^1.7.9",
     "bcryptjs": "^3.0.3",
     "cors": "^2.8.6",
     "dotenv": "^16.4.5",
     "express": "^4.19.2",
     "jsonwebtoken": "^9.0.3",
-    "pg": "^8.22.0"
+    "nodemailer": "^9.0.5",
+    "pg": "^8.22.0",
+    "uuid": "^11.0.5"
   }
 }

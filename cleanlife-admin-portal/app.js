@@ -95,17 +95,125 @@ async function createCollector() {
   }
 }
 
+async function loadWalletTab() {
+  await Promise.all([loadCompanyBalance(), loadWalletCollectors(), loadCompanyTransactions()]);
+}
+
+async function loadCompanyBalance() {
+  const el = document.getElementById('company-balance');
+  el.textContent = '…';
+  try {
+    const data = await apiFetch('/admin/payouts/company-balance');
+    el.textContent = `${Number(data.balance).toLocaleString()} FCFA`;
+  } catch (err) {
+    el.textContent = `Error: ${err.message}`;
+  }
+}
+
+async function loadWalletCollectors() {
+  const select = document.getElementById('payout-collector');
+  const tbody = document.querySelector('#collector-balances-table tbody');
+  tbody.innerHTML = '<tr><td colspan="2">Loading...</td></tr>';
+  try {
+    const rows = await apiFetch('/admin/collectors');
+    select.innerHTML = '';
+    tbody.innerHTML = '';
+    if (rows.length === 0) {
+      select.innerHTML = '<option value="">No collectors yet</option>';
+      tbody.innerHTML = '<tr><td colspan="2">No collectors yet.</td></tr>';
+      return;
+    }
+    for (const c of rows) {
+      const option = document.createElement('option');
+      option.value = c.id;
+      option.textContent = c.full_name || c.username;
+      select.appendChild(option);
+
+      const tr = document.createElement('tr');
+      tr.innerHTML = `<td>${c.full_name || c.username}</td><td>${Number(c.balance).toLocaleString()}</td>`;
+      tbody.appendChild(tr);
+    }
+  } catch (err) {
+    tbody.innerHTML = `<tr><td colspan="2">Error: ${err.message}</td></tr>`;
+  }
+}
+
+async function loadCompanyTransactions() {
+  const tbody = document.querySelector('#company-transactions-table tbody');
+  tbody.innerHTML = '<tr><td colspan="4">Loading...</td></tr>';
+  try {
+    const rows = await apiFetch('/admin/payouts/company-transactions');
+    tbody.innerHTML = '';
+    if (rows.length === 0) {
+      tbody.innerHTML = '<tr><td colspan="4">No transactions yet.</td></tr>';
+      return;
+    }
+    for (const tx of rows) {
+      const tr = document.createElement('tr');
+      const sign = tx.type === 'payout' ? '-' : '+';
+      tr.innerHTML = `
+        <td>${new Date(tx.created_at).toLocaleString()}</td>
+        <td>${tx.type.replace('_', ' ')}</td>
+        <td>${sign}${Number(tx.amount).toLocaleString()}</td>
+        <td>${tx.description || '—'}</td>
+      `;
+      tbody.appendChild(tr);
+    }
+  } catch (err) {
+    tbody.innerHTML = `<tr><td colspan="4">Error: ${err.message}</td></tr>`;
+  }
+}
+
+async function sendPayout() {
+  const collectorId = document.getElementById('payout-collector').value;
+  const amount = Number(document.getElementById('payout-amount').value);
+  const description = document.getElementById('payout-description').value.trim();
+  const resultEl = document.getElementById('payout-result');
+  resultEl.className = '';
+
+  if (!collectorId) {
+    resultEl.className = 'error';
+    resultEl.textContent = 'Select a collector.';
+    return;
+  }
+  if (!amount || amount <= 0) {
+    resultEl.className = 'error';
+    resultEl.textContent = 'Enter a positive amount.';
+    return;
+  }
+
+  try {
+    const result = await apiFetch('/admin/payouts', {
+      method: 'POST',
+      body: JSON.stringify({ collector_id: Number(collectorId), amount, description: description || undefined }),
+    });
+    resultEl.className = 'success';
+    resultEl.textContent = `Sent ${amount.toLocaleString()} FCFA. Company balance: ${Number(result.company_new_balance).toLocaleString()} FCFA.`;
+    document.getElementById('payout-amount').value = '';
+    document.getElementById('payout-description').value = '';
+    await loadWalletTab();
+  } catch (err) {
+    resultEl.className = 'error';
+    resultEl.textContent = `Failed: ${err.message}`;
+  }
+}
+
 function initDashboard() {
   showView('dashboard-view');
   showTab('collectors');
   loadCollectors();
 
   document.querySelectorAll('.tab-btn').forEach((btn) => {
-    btn.onclick = () => showTab(btn.dataset.tab);
+    btn.onclick = () => {
+      showTab(btn.dataset.tab);
+      if (btn.dataset.tab === 'wallet') loadWalletTab();
+    };
   });
 
   document.getElementById('refresh-collectors').onclick = loadCollectors;
   document.getElementById('create-collector').onclick = createCollector;
+  document.getElementById('refresh-wallet').onclick = loadWalletTab;
+  document.getElementById('send-payout').onclick = sendPayout;
   document.getElementById('logout-btn').onclick = () => {
     sessionStorage.removeItem('cl_company_admin_session');
     showView('login-view');

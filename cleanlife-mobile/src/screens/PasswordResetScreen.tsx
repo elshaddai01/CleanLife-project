@@ -21,9 +21,9 @@ export default function PasswordResetScreen({
   onBack,
   onComplete,
 }: Props) {
-  const [step, setStep] = useState<'phone' | 'code'>('phone');
+  const [step, setStep] = useState<'email' | 'code'>('email');
 
-  const [phone, setPhone] = useState('');
+  const [email, setEmail] = useState('');
   const [code, setCode] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
@@ -31,21 +31,19 @@ export default function PasswordResetScreen({
   const [loading, setLoading] = useState(false);
 
   const requestCode = async () => {
-    if (!phone.trim()) {
-      Alert.alert('Missing phone number', 'Enter your phone number.');
+    if (!email.trim()) {
+      Alert.alert('Missing email', 'Enter your email address.');
       return;
     }
 
     setLoading(true);
 
     try {
-      const result = await authApi.requestPasswordReset(phone.trim());
+      const result = await authApi.requestPasswordReset(email.trim());
 
       Alert.alert(
-        'Code sent',
-        result.reset_code
-          ? `Your development reset code is ${result.reset_code}`
-          : 'A password reset code has been sent to your phone.'
+        result.email_delivered ? 'Code sent' : 'Could not send email',
+        result.message
       );
 
       setStep('code');
@@ -83,7 +81,7 @@ export default function PasswordResetScreen({
     setLoading(true);
 
     try {
-      await authApi.resetPassword(phone.trim(), code, password);
+      await authApi.resetPassword(email.trim(), code, password);
 
       Alert.alert(
         'Password reset',
@@ -114,18 +112,19 @@ export default function PasswordResetScreen({
 
         <Text style={styles.title}>Reset Password</Text>
 
-        {step === 'phone' ? (
+        {step === 'email' ? (
           <>
             <Text style={styles.subtitle}>
-              Enter your phone number and we will send you a reset code.
+              Enter your email address and we will send you a reset code.
             </Text>
 
             <TextInput
               style={styles.input}
-              placeholder="Phone number"
-              value={phone}
-              onChangeText={setPhone}
-              keyboardType="phone-pad"
+              placeholder="Email"
+              value={email}
+              onChangeText={setEmail}
+              autoCapitalize="none"
+              keyboardType="email-address"
             />
 
             <Pressable

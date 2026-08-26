@@ -6,7 +6,7 @@ import type { PickupStatus, WasteType, VehicleType } from './types';
 // ============ CONFIGURATION ============
 function getApiBaseUrl() {
   const configuredUrl = process.env.EXPO_PUBLIC_API_BASE_URL?.trim();
-  const apiPort = process.env.EXPO_PUBLIC_API_PORT?.trim() || '3001';
+  const apiPort = process.env.EXPO_PUBLIC_API_PORT?.trim() || '5000';
 
   if (__DEV__) {
     const scriptUrl = NativeModules.SourceCode?.scriptURL as string | undefined;
@@ -215,17 +215,21 @@ export const authApi = {
     password: string;
     company_code?: string;
   }) {
-    return request<{ id: number; name: string; phone_number: string; company_id: number | null; company_name: string | null; created_at: string }>(
+    return request<{
+      message: string;
+      email_delivered: boolean;
+      client: { id: number; name: string; phone_number: string; company_id: number | null; company_name: string | null; created_at: string };
+    }>(
       '/clients/register',
       { method: 'POST', body: JSON.stringify(params) },
       false
     );
   },
 
-  loginClient(phone_number: string, password: string) {
+  loginClient(email: string, password: string) {
     return request<LoginResponse>(
       '/auth/login',
-      { method: 'POST', body: JSON.stringify({ phone_number, password }) },
+      { method: 'POST', body: JSON.stringify({ email, password }) },
       false
     ).then((res): ClientAuthResult => ({
       token: res.tokens.access_token,
@@ -298,18 +302,26 @@ export const authApi = {
     );
   },
 
-  requestPasswordReset(phone_number: string) {
-    return request<{ message: string; reset_code?: string }>(
-      '/clients/request-password-reset',
-      { method: 'POST', body: JSON.stringify({ phone_number }) },
+  resendEmailCode(email: string) {
+    return request<{ message: string; email_delivered: boolean }>(
+      '/clients/resend-email-code',
+      { method: 'POST', body: JSON.stringify({ email }) },
       false
     );
   },
 
-  resetPassword(phone_number: string, code: string, new_password: string) {
+  requestPasswordReset(email: string) {
+    return request<{ message: string; email_delivered: boolean }>(
+      '/clients/request-password-reset',
+      { method: 'POST', body: JSON.stringify({ email }) },
+      false
+    );
+  },
+
+  resetPassword(email: string, code: string, new_password: string) {
     return request<{ message: string }>(
       '/clients/reset-password',
-      { method: 'POST', body: JSON.stringify({ phone_number, code, new_password }) },
+      { method: 'POST', body: JSON.stringify({ email, code, new_password }) },
       false
     );
   },
@@ -361,6 +373,11 @@ export function deriveStatus(pr: BackendPickupRequest, hasProofOfWork: boolean):
 
 
 
+// This replaces the ENTIRE existing "export const pickupApi = { ... };"
+// block in apiClient.ts. Delete your current one and paste this in its
+// place — adds client_latitude/client_longitude to getStatus (needed for
+// the map's destination marker), plus confirmPayment.
+
 export const pickupApi = {
   create(params: {
     client_id: number;
@@ -409,11 +426,18 @@ export const pickupApi = {
     );
   },
 
+  confirmPayment(requestId: number) {
+    return request<{ status: string; id?: number; momo_confirmed_at?: string; pawapay_status?: string; message?: string }>(
+      `/pickup-requests/${requestId}/confirm-payment`,
+      { method: 'POST' }
+    );
+  },
+
   submitProofOfWork(requestId: number, params: { photo_storage_url: string; exif_latitude?: number; exif_longitude?: number; bin_code?: string }) {
     return request<{
       proof_of_work: { id: number; is_verified: boolean; verification_method: string; dumpster_id: number | null };
       pickup_request: { id: number; routing_status: string; payment_status: string; estimated_price_fcfa: number };
-      wallet_credit: { id: number; new_balance: string } | null;
+      wallet_credit: { id: number; new_balance: string; routed_to?: string } | null;
     }>(`/pickup-requests/${requestId}/proof-of-work`, { method: 'POST', body: JSON.stringify(params) });
   },
 
@@ -430,6 +454,8 @@ export const pickupApi = {
       has_proof_of_work: boolean;
       collector_full_name: string | null;
       collector_phone_number: string | null;
+      client_latitude: string | null;
+      client_longitude: string | null;
     }>(`/pickup-requests/${requestId}`);
   },
 };

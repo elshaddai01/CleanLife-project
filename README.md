@@ -77,7 +77,7 @@ Your API base URL for the rest of this guide is:
 ```
 http://<that IP>:<PORT from .env>
 ```
-Example: `http://192.168.1.178:4000`
+Example: `http://192.168.1.178:5000`
 
 ### 5. Mobile app
 

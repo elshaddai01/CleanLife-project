@@ -8,14 +8,17 @@ const { nonEmptyString } = require('../utils/validation');
 
 const router = express.Router();
 
-// UNIFIED LOGIN - Works for collectors AND clients
+// UNIFIED LOGIN - Works for collectors (username) AND clients (email)
+// [AUTH-02] Clients used to log in with phone_number — switched to email
+// for a better identifier (phone formatting/reuse issues are common; email
+// is already required and verified at registration, see migration 044).
 router.post('/login', async (req, res) => {
     const identifier = nonEmptyString(req.body.username) ||
-                       nonEmptyString(req.body.phone_number)?.replace(/\s+/g, '');
+                       nonEmptyString(req.body.email)?.replace(/\s+/g, '');
     const password = nonEmptyString(req.body.password);
 
     if (!identifier || !password) {
-        return res.status(400).json({ error: 'username/phone and password are required' });
+        return res.status(400).json({ error: 'username/email and password are required' });
     }
 
     try {
@@ -48,7 +51,7 @@ router.post('/login', async (req, res) => {
         // Try client
         if (!user) {
             const clientResult = await pool.query(
-                'SELECT * FROM find_client_by_phone($1)',
+                'SELECT * FROM find_client_by_email($1)',
                 [identifier]
             );
 
@@ -63,10 +66,16 @@ router.post('/login', async (req, res) => {
                 }
 
                 const passwordOk = await comparePassword(password, client.password_hash);
+                if (passwordOk && !client.email_verified) {
+                    return res.status(403).json({
+                        error: 'please verify your email before logging in',
+                        code: 'EMAIL_NOT_VERIFIED',
+                    });
+                }
                 if (passwordOk) {
                     user = {
                         id: client.id,
-                        username: client.phone_number,
+                        username: identifier,
                         role: 'client',
                         company_id: client.company_id,
                         name: client.name,

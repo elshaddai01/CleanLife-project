@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { View, Text, Pressable, StyleSheet, ActivityIndicator, Linking, Alert } from 'react-native';
 import { WebView } from 'react-native-webview';
 import { pickupApi, locationApi, etaApi, ApiError } from '../../apiClient';
+import { buildTrackingMapHtml } from '../../utils/mapHtml';
 
 type Props = {
   requestId: number;
@@ -25,47 +26,6 @@ type CollectorLocation = {
 const POLL_INTERVAL_MS = 5000;
 const LOCATION_POLL_INTERVAL_MS = 8000;
 const ETA_POLL_INTERVAL_MS = 15000;
-
-const DEFAULT_CENTER = { lat: 3.848, lng: 11.5021 };
-
-function buildMapHtml(initialLat: number, initialLng: number) {
-  return `
-<!DOCTYPE html>
-<html>
-<head>
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
-  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
-  <style>
-    html, body, #map { height: 100%; margin: 0; padding: 0; }
-  </style>
-</head>
-<body>
-  <div id="map"></div>
-  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-  <script>
-    var map = L.map('map', { zoomControl: false, attributionControl: false })
-      .setView([${initialLat}, ${initialLng}], 15);
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-      maxZoom: 19,
-    }).addTo(map);
-
-    var collectorIcon = L.divIcon({
-      className: '',
-      html: '<div style="background:#0891b2;width:18px;height:18px;border-radius:9px;border:3px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,0.4);"></div>',
-      iconSize: [18, 18],
-    });
-
-    var marker = L.marker([${initialLat}, ${initialLng}], { icon: collectorIcon }).addTo(map);
-
-    window.updateCollector = function(lat, lng) {
-      marker.setLatLng([lat, lng]);
-      map.panTo([lat, lng]);
-    };
-  </script>
-</body>
-</html>
-  `;
-}
 
 function formatEta(seconds: number): string {
   if (seconds < 60) return '<1 min';
@@ -124,7 +84,7 @@ export default function TrackPickupScreen({ requestId, onBack, onSessionExpired 
         const lat = Number(result.last_latitude);
         const lng = Number(result.last_longitude);
         if (mapReadyRef.current && webViewRef.current) {
-          webViewRef.current.injectJavaScript(`window.updateCollector && window.updateCollector(${lat}, ${lng}); true;`);
+          webViewRef.current.injectJavaScript(`window.updateMover && window.updateMover(${lat}, ${lng}); true;`);
         }
       } catch (err) {
         if (err instanceof ApiError && err.status === 401) onSessionExpired();
@@ -165,21 +125,37 @@ export default function TrackPickupScreen({ requestId, onBack, onSessionExpired 
   }, [status?.routing_status, requestId]);
 
   const mapHtml = useMemo(() => {
-    const lat = collectorLocation ? Number(collectorLocation.last_latitude) : DEFAULT_CENTER.lat;
-    const lng = collectorLocation ? Number(collectorLocation.last_longitude) : DEFAULT_CENTER.lng;
-    return buildMapHtml(lat, lng);
+    if (!status?.client_latitude || !status?.client_longitude) return null;
+    const destination = { lat: Number(status.client_latitude), lng: Number(status.client_longitude) };
+    const mover = collectorLocation
+      ? { lat: Number(collectorLocation.last_latitude), lng: Number(collectorLocation.last_longitude) }
+      : destination;
+    return buildTrackingMapHtml(destination, mover, '#0891b2');
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [status?.client_latitude, status?.client_longitude]);
 
+  // [MOMO-07] Handles all 3 real outcomes from the backend now that this
+  // checks the actual pawaPay transaction status, not a demo instant
+  // confirmation: completed (success), still pending (202 — ask the
+  // client to wait), or failed/rejected (422 — payment genuinely didn't
+  // go through, they may need to retry from their MoMo app).
   const handleValidatePayment = async () => {
     setConfirmingPayment(true);
     try {
-      await pickupApi.confirmPayment(requestId);
+      const result: any = await pickupApi.confirmPayment(requestId);
       await load();
-      Alert.alert('Payment confirmed', 'Your collector has been notified and can now proceed.');
+      if (result?.status === 'completed') {
+        Alert.alert('Payment confirmed', 'Your collector has been notified and can now proceed.');
+      }
     } catch (err) {
       if (err instanceof ApiError && err.status === 401) return onSessionExpired();
-      Alert.alert('Could not confirm payment', err instanceof ApiError ? err.message : String(err));
+      if (err instanceof ApiError && err.status === 202) {
+        Alert.alert('Still processing', 'Your payment is still being processed by MoMo. Please wait a moment and try again.');
+      } else if (err instanceof ApiError && err.status === 422) {
+        Alert.alert('Payment failed', 'The payment did not go through. Please try sending it again from your MoMo app, then tap Validate Payment again.');
+      } else {
+        Alert.alert('Could not confirm payment', err instanceof ApiError ? err.message : String(err));
+      }
     } finally {
       setConfirmingPayment(false);
     }
@@ -216,7 +192,7 @@ export default function TrackPickupScreen({ requestId, onBack, onSessionExpired 
     return 'Finding a collector';
   })();
 
-  const showMap = status?.routing_status === 'assigned';
+  const showMap = status?.routing_status === 'assigned' && mapHtml;
   const needsPaymentValidation =
     status?.routing_status === 'assigned' &&
     status?.payment_method === 'MOMO' &&
@@ -237,7 +213,7 @@ export default function TrackPickupScreen({ requestId, onBack, onSessionExpired 
         <WebView
           ref={webViewRef}
           originWhitelist={['*']}
-          source={{ html: mapHtml }}
+          source={{ html: mapHtml as string }}
           style={styles.map}
           onLoadEnd={() => {
             mapReadyRef.current = true;
@@ -287,7 +263,7 @@ export default function TrackPickupScreen({ requestId, onBack, onSessionExpired 
         {needsPaymentValidation && (
           <View style={styles.paymentPrompt}>
             <Text style={styles.paymentPromptText}>
-              Your collector has arrived. Confirm your MoMo payment to let them proceed.
+              A payment request was sent to your phone. Enter your MoMo PIN there, then tap below to confirm.
             </Text>
             <Pressable
               style={styles.validateButton}
@@ -297,7 +273,7 @@ export default function TrackPickupScreen({ requestId, onBack, onSessionExpired 
               {confirmingPayment ? (
                 <ActivityIndicator color="#fff" />
               ) : (
-                <Text style={styles.validateButtonText}>Validate Payment (Demo)</Text>
+                <Text style={styles.validateButtonText}>Validate Payment</Text>
               )}
             </Pressable>
           </View>

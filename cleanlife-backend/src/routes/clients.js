@@ -4,6 +4,7 @@ const { handleDbError } = require('../utils/dbErrors');
 const { hashPassword } = require('../utils/password');
 const { nonEmptyString, positiveInteger } = require('../utils/validation');
 const { requireAuth } = require('../middleware/auth');
+const mailer = require('../services/mailer');
 
 const router = express.Router();
 
@@ -95,9 +96,31 @@ router.post('/register', async (req, res) => {
             return result.rows[0];
         });
 
+        // [MAIL-02] Real email delivery for the registration OTP. Non-fatal —
+        // the client record already exists at this point, and a delivery
+        // failure (e.g. SMTP not configured yet in this environment) must
+        // not undo a successful registration. Falls back to logging the
+        // code server-side so local development still works without SMTP
+        // credentials — never returned in the API response itself, unlike
+        // the phone reset code, since that would defeat the point of an OTP.
+        let emailDelivered = true;
+        try {
+            await mailer.sendEmail({
+                to: email,
+                subject: 'CleanLife — verify your email',
+                text: `Your CleanLife email verification code is ${emailCode}. It expires in 10 minutes.`,
+            });
+        } catch (mailError) {
+            emailDelivered = false;
+            console.error(`[mail] Could not send verification email to ${email}: ${mailError.message}`);
+            console.warn(`[mail] DEV FALLBACK — verification code for ${email} is ${emailCode}`);
+        }
 
         return res.status(201).json({
-            message: 'Registration successful. Verify email and phone.',
+            message: emailDelivered
+                ? 'Registration successful. Check your email for a verification code.'
+                : 'Registration successful, but the verification email could not be sent — contact support.',
+            email_delivered: emailDelivered,
             client: inserted
         });
 
@@ -242,15 +265,69 @@ router.post('/verify-email', async (req, res) => {
 
 
 
+// [MAIL-03] Lets a client who never got (or let expire) their registration
+// email request a fresh code, instead of being stuck unverified forever.
+// POST /clients/resend-email-code
+// Body: { email }
+router.post('/resend-email-code', async (req, res) => {
+    const email = nonEmptyString(req.body.email);
+    if (!email) {
+        return res.status(400).json({ error: 'email is required' });
+    }
+
+    try {
+        const emailCode = Math.floor(100000 + Math.random() * 900000).toString();
+        const expiry = new Date(Date.now() + 10 * 60 * 1000);
+
+        const result = await pool.query(
+            `UPDATE clients
+             SET email_verification_code = $1,
+                 email_verification_expiry = $2
+             WHERE email = $3 AND email_verified = false
+             RETURNING id`,
+            [emailCode, expiry, email]
+        );
+
+        if (result.rows.length === 0) {
+            return res.status(404).json({ error: 'no unverified account found for that email' });
+        }
+
+        let emailDelivered = true;
+        try {
+            await mailer.sendEmail({
+                to: email,
+                subject: 'CleanLife — your new verification code',
+                text: `Your new CleanLife email verification code is ${emailCode}. It expires in 10 minutes.`,
+            });
+        } catch (mailError) {
+            emailDelivered = false;
+            console.error(`[mail] Could not resend verification email to ${email}: ${mailError.message}`);
+            console.warn(`[mail] DEV FALLBACK — verification code for ${email} is ${emailCode}`);
+        }
+
+        return res.json({
+            message: emailDelivered ? 'Verification code resent.' : 'Could not send the email — contact support.',
+            email_delivered: emailDelivered,
+        });
+    } catch (err) {
+        return handleDbError(err, res, 'resend verification code');
+    }
+});
+
+// [MAIL-05] Was returning reset_code directly in the API response — anyone
+// who knew a client's phone number could fetch their reset code with no
+// verification at all, defeating the point of the code. Now sent to the
+// client's email (same real delivery path as the registration OTP) instead
+// of handed back over the same channel that requested it.
 // POST /clients/request-password-reset
-// Body: { phone_number }
+// Body: { email }
 router.post('/request-password-reset', async (req,res)=>{
 
-    const phone_number = nonEmptyString(req.body.phone_number);
+    const email = nonEmptyString(req.body.email);
 
-    if(!phone_number){
+    if(!email){
         return res.status(400).json({
-            error:'phone_number is required'
+            error:'email is required'
         });
     }
 
@@ -266,12 +343,12 @@ router.post('/request-password-reset', async (req,res)=>{
             `UPDATE clients
              SET reset_code=$1,
                  reset_expiry=$2
-             WHERE phone_number=$3
+             WHERE email=$3
              RETURNING id`,
              [
                 resetCode,
                 expiry,
-                phone_number
+                email
              ]
         );
 
@@ -282,10 +359,24 @@ router.post('/request-password-reset', async (req,res)=>{
             });
         }
 
+        let emailDelivered = true;
+        try {
+            await mailer.sendEmail({
+                to: email,
+                subject: 'CleanLife — password reset code',
+                text: `Your CleanLife password reset code is ${resetCode}. It expires in 10 minutes. If you didn't request this, you can ignore this email.`,
+            });
+        } catch (mailError) {
+            emailDelivered = false;
+            console.error(`[mail] Could not send password reset email to ${email}: ${mailError.message}`);
+            console.warn(`[mail] DEV FALLBACK — password reset code for ${email} is ${resetCode}`);
+        }
 
         res.json({
-            message:'Password reset code generated',
-            reset_code: resetCode
+            message: emailDelivered
+                ? 'A password reset code has been sent to your email.'
+                : 'Could not send the reset email right now — contact support.',
+            email_delivered: emailDelivered,
         });
 
 
@@ -298,17 +389,17 @@ router.post('/request-password-reset', async (req,res)=>{
 
 
 // POST /clients/reset-password
-// Body: { phone_number, code, new_password }
+// Body: { email, code, new_password }
 router.post('/reset-password', async(req,res)=>{
 
-    const phone_number = nonEmptyString(req.body.phone_number);
+    const email = nonEmptyString(req.body.email);
     const code = nonEmptyString(req.body.code);
     const new_password = nonEmptyString(req.body.new_password);
 
 
-    if(!phone_number || !code || !new_password){
+    if(!email || !code || !new_password){
         return res.status(400).json({
-            error:'phone_number, code and new_password are required'
+            error:'email, code and new_password are required'
         });
     }
 
@@ -323,13 +414,13 @@ router.post('/reset-password', async(req,res)=>{
              SET password_hash=$1,
                  reset_code=NULL,
                  reset_expiry=NULL
-             WHERE phone_number=$2
+             WHERE email=$2
              AND reset_code=$3
              AND reset_expiry > NOW()
              RETURNING id`,
              [
                 password_hash,
-                phone_number,
+                email,
                 code
              ]
         );
