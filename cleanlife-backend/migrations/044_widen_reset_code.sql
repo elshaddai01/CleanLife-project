@@ -1,0 +1,2 @@
+ALTER TABLE clients
+ALTER COLUMN reset_code TYPE VARCHAR(9);
