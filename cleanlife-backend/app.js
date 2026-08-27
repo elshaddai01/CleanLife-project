@@ -15,7 +15,6 @@ const ratingsRouter = require('./src/routes/ratings');
 const uploadsRouter = require('./src/routes/uploads');
 const { startDispatchWorker } = require('./src/queues/dispatchWorker');
 const { pool, checkDatabaseConnection } = require('./src/db/pool');
-const etaRouter = require('./src/routes/etaRoutes');
 const notificationsRouter = require('./src/routes/notifications');
 const app = express();
 app.disable('x-powered-by');
@@ -38,7 +37,6 @@ app.use('/wallet', walletRouter);
 app.use('/admin', adminRouter);
 app.use('/ratings', ratingsRouter);
 app.use('/uploads', uploadsRouter);
-app.use('/eta', etaRouter);
 app.use('/notifications', notificationsRouter);
 app.get('/health', async (req, res) => {
     try {
