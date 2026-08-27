@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -9,9 +9,11 @@ import {
   Alert,
   Image,
 } from 'react-native';
+import { WebView } from 'react-native-webview';
 import * as Location from 'expo-location';
 import * as ImagePicker from 'expo-image-picker';
 import { pickupApi, uploadApi, locationApi, ApiError } from '../../apiClient';
+import { buildTrackingMapHtml } from '../../utils/mapHtml';
 
 type Props = {
   requestId: number;
@@ -38,6 +40,10 @@ export default function ActiveJobScreen({ requestId, onBack, onCompleted, onSess
   const [lng, setLng] = useState<number | null>(null);
   const [locating, setLocating] = useState(false);
   const [locationSharing, setLocationSharing] = useState(false);
+  const [collectorPos, setCollectorPos] = useState<{ lat: number; lng: number } | null>(null);
+  const [initialMover, setInitialMover] = useState<{ lat: number; lng: number } | null>(null);
+  const webViewRef = useRef<WebView>(null);
+  const mapReadyRef = useRef(false);
 
   const load = useCallback(async () => {
     try {
@@ -74,8 +80,13 @@ export default function ActiveJobScreen({ requestId, onBack, onCompleted, onSess
         const { status: permStatus } = await Location.getForegroundPermissionsAsync();
         if (permStatus !== 'granted') return;
         const position = await Location.getCurrentPositionAsync({});
-        await locationApi.updateMyLocation(position.coords.latitude, position.coords.longitude);
+        const coords = { lat: position.coords.latitude, lng: position.coords.longitude };
+        await locationApi.updateMyLocation(coords.lat, coords.lng);
         setLocationSharing(true);
+        setCollectorPos(coords);
+        if (mapReadyRef.current && webViewRef.current) {
+          webViewRef.current.injectJavaScript(`window.updateMover && window.updateMover(${coords.lat}, ${coords.lng}); true;`);
+        }
       } catch (err) {
         // Non-fatal — a missed location ping shouldn't interrupt the job flow.
         console.warn('location update failed', err);
@@ -93,8 +104,28 @@ export default function ActiveJobScreen({ requestId, onBack, onCompleted, onSess
         locationTimerRef.current = null;
       }
       setLocationSharing(false);
+      if (!isActive) {
+        setCollectorPos(null);
+        setInitialMover(null);
+        mapReadyRef.current = false;
+      }
     };
   }, [status?.routing_status]);
+
+  useEffect(() => {
+    if (collectorPos && !initialMover) setInitialMover(collectorPos);
+  }, [collectorPos, initialMover]);
+
+  // [NAV-02] Built once per job from the first GPS fix — collectorPos keeps
+  // updating every 20s via injectJavaScript(window.updateMover(...)) instead
+  // of rebuilding this HTML, so the WebView doesn't reload (and lose its
+  // fetched route/zoom) on every location ping.
+  const mapHtml = useMemo(() => {
+    if (!status?.client_latitude || !status?.client_longitude || !initialMover) return null;
+    const destination = { lat: Number(status.client_latitude), lng: Number(status.client_longitude) };
+    return buildTrackingMapHtml(destination, initialMover, '#0891b2', { showDirections: true });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [status?.client_latitude, status?.client_longitude, initialMover]);
 
   const handleArrive = async () => {
     setBusy('arrive');
@@ -222,6 +253,27 @@ export default function ActiveJobScreen({ requestId, onBack, onCompleted, onSess
       <Text style={styles.title}>Job #{requestId}</Text>
       <Text style={styles.subtitle}>Status: {status.routing_status.replace('_', ' ')}</Text>
 
+      {status.routing_status === 'assigned' && (
+        <View style={styles.mapContainer}>
+          {mapHtml ? (
+            <WebView
+              ref={webViewRef}
+              originWhitelist={['*']}
+              source={{ html: mapHtml }}
+              style={StyleSheet.absoluteFillObject}
+              onLoadEnd={() => {
+                mapReadyRef.current = true;
+              }}
+            />
+          ) : (
+            <View style={[StyleSheet.absoluteFillObject, styles.mapPlaceholder]}>
+              <ActivityIndicator color="#0891b2" />
+              <Text style={styles.mapPlaceholderText}>Getting your location…</Text>
+            </View>
+          )}
+        </View>
+      )}
+
       {locationSharing && (
         <View style={styles.locationBadge}>
           <Text style={styles.locationBadgeText}>📍 Sharing your location with the client</Text>
@@ -299,6 +351,9 @@ const styles = StyleSheet.create({
   backText: { color: '#0891b2', fontWeight: '700', fontSize: 14 },
   title: { fontSize: 22, fontWeight: '900', color: '#0e7490' },
   subtitle: { fontSize: 13, color: '#64748b', marginBottom: 20, textTransform: 'capitalize' },
+  mapContainer: { height: 280, borderRadius: 14, overflow: 'hidden', marginBottom: 14, borderWidth: 1, borderColor: '#e2e8f0', backgroundColor: '#e2e8f0' },
+  mapPlaceholder: { alignItems: 'center', justifyContent: 'center' },
+  mapPlaceholderText: { marginTop: 8, fontSize: 12, color: '#64748b' },
   locationBadge: { backgroundColor: '#ecfeff', borderRadius: 10, paddingVertical: 8, paddingHorizontal: 12, marginBottom: 14, borderWidth: 1, borderColor: '#a5f3fc' },
   locationBadgeText: { color: '#0e7490', fontSize: 12, fontWeight: '700' },
   actionButton: { backgroundColor: '#0891b2', borderRadius: 12, paddingVertical: 14, alignItems: 'center', marginBottom: 8 },
