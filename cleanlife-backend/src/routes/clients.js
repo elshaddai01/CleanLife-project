@@ -58,7 +58,7 @@ router.post('/register', async (req, res) => {
 
         const password_hash = password ? await hashPassword(password) : null;
 
-        // Generate verification codes
+        // Generate the email OTP used to activate the client account.
         const emailCode = Math.floor(100000 + Math.random() * 900000).toString();
 
         const expiry = new Date(Date.now() + 10 * 60 * 1000);
@@ -94,10 +94,7 @@ router.post('/register', async (req, res) => {
         });
 
 
-                // [OTP-01] Fire SMS after the client row exists. If SMS fails, the
-        // account still exists with a valid stored code — don't fail
-        // registration over a delivery hiccup, but tell the client so the
-        // UI can offer a "resend code" action instead of silently hanging.
+            // [OTP-01] Send the activation code by email after the client row exists.
         const emailSent = await sendOtpEmail(email, emailCode);
 
         return res.status(201).json({
@@ -246,6 +243,38 @@ router.post('/resend-code', async (req, res) => {
         return res.json({ message: smsSent ? 'Code resent' : 'Failed to send SMS', sms_sent: smsSent });
     } catch (err) {
         return handleDbError(err, res, 'resend code');
+    }
+});
+
+// POST /clients/resend-email-code
+// Body: { email }
+router.post('/resend-email-code', async (req, res) => {
+    const email = nonEmptyString(req.body.email);
+    if (!email) return res.status(400).json({ error: 'email is required' });
+
+    try {
+        const emailCode = Math.floor(100000 + Math.random() * 900000).toString();
+        const expiry = new Date(Date.now() + 10 * 60 * 1000);
+        const result = await pool.query(
+            `UPDATE clients
+             SET email_verification_code = $1, email_verification_expiry = $2
+             WHERE email = $3 AND email_verified = false
+             RETURNING id`,
+            [emailCode, expiry, email]
+        );
+
+        if (result.rows.length === 0) {
+            return res.status(404).json({ error: 'client not found or already verified' });
+        }
+
+        const emailSent = await sendOtpEmail(email, emailCode);
+        return res.json({
+            message: emailSent ? 'Email code resent' : 'Email could not be sent',
+            email_sent: emailSent,
+            ...(process.env.NODE_ENV !== 'production' && !emailSent ? { development_otp: emailCode } : {}),
+        });
+    } catch (err) {
+        return handleDbError(err, res, 'resend email code');
     }
 });
 
