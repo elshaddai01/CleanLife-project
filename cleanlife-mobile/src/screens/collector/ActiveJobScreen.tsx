@@ -31,7 +31,7 @@ const LOCATION_UPDATE_INTERVAL_MS = 20000;
 
 export default function ActiveJobScreen({ requestId, onBack, onCompleted, onSessionExpired }: Props) {
   const [status, setStatus] = useState<Awaited<ReturnType<typeof pickupApi.getStatus>> | null>(null);
-  const [paymentMethod, setPaymentMethod] = useState<'CASH' | 'MOMO' | null>(null);
+  const [paymentMethod, setPaymentMethod] = useState<'MOMO' | 'OM' | null>(null);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState<string | null>(null);
   const [snapshot, setSnapshot] = useState<{ uri: string; base64: string; mimeType: 'image/jpeg' | 'image/png' } | null>(null);
@@ -131,24 +131,11 @@ export default function ActiveJobScreen({ requestId, onBack, onCompleted, onSess
     setBusy('arrive');
     try {
       const result = await pickupApi.arrive(requestId);
-      setPaymentMethod(result.payment_method as 'CASH' | 'MOMO');
+      setPaymentMethod(result.payment_method as 'MOMO' | 'OM');
       await load();
     } catch (err) {
       const message = err instanceof ApiError ? `[${err.status}] ${err.message}` : String(err);
       Alert.alert('Could not mark arrival', message);
-    } finally {
-      setBusy(null);
-    }
-  };
-
-  const handleCollectCash = async () => {
-    setBusy('cash');
-    try {
-      await pickupApi.collectCash(requestId);
-      await load();
-    } catch (err) {
-      const message = err instanceof ApiError ? `[${err.status}] ${err.message}` : String(err);
-      Alert.alert('Could not confirm cash', message);
     } finally {
       setBusy(null);
     }
@@ -289,15 +276,9 @@ export default function ActiveJobScreen({ requestId, onBack, onCompleted, onSess
       {arrived && !paymentDone && (
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Payment</Text>
-          {paymentMethod === 'MOMO' ? (
-            <Text style={styles.infoText}>
-              MoMo Request-to-Pay sent. Waiting for the client to confirm on their phone — pull to refresh or check back.
-            </Text>
-          ) : (
-            <Pressable style={styles.actionButton} onPress={handleCollectCash} disabled={busy === 'cash'}>
-              {busy === 'cash' ? <ActivityIndicator color="#fff" /> : <Text style={styles.actionText}>Confirm cash received</Text>}
-            </Pressable>
-          )}
+          <Text style={styles.infoText}>
+            {paymentMethod === 'OM' ? 'Orange Money' : 'MTN MoMo'} Request-to-Pay sent. Waiting for the client to confirm on their phone — pull to refresh or check back.
+          </Text>
           <Pressable style={styles.refreshLink} onPress={load}>
             <Text style={styles.refreshLinkText}>Refresh status</Text>
           </Pressable>

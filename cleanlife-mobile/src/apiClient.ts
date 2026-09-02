@@ -347,7 +347,7 @@ export interface BackendPickupRequest {
   routing_status: 'searching_corporate' | 'admin_hold' | 'broadcast_public' | 'assigned' | 'completed';
   admin_hold_expires_at: string | null;
   current_stage_rank: number;
-  payment_method: 'CASH' | 'MOMO';
+  payment_method: 'MOMO' | 'OM';
   payment_status: 'PENDING_COMPLETION' | 'COMPLETED' | 'FAILED';
   estimated_price_fcfa: number | null;
   collector_arrived_at?: string | null;
@@ -385,7 +385,7 @@ export const pickupApi = {
     waste_type: WasteType;
     latitude: number;
     longitude: number;
-    payment_method: 'CASH' | 'MOMO';
+    payment_method: 'MOMO' | 'OM';
   }) {
     return request<BackendPickupRequest & { mobility_type: string; nearest_dumpster_id: number | null; nearest_dumpster_distance_meters: number | null }>(
       '/pickup-requests',
@@ -446,7 +446,7 @@ export const pickupApi = {
       id: number;
       routing_status: BackendPickupRequest['routing_status'];
       collector_id: number | null;
-      payment_method: 'CASH' | 'MOMO';
+      payment_method: 'MOMO' | 'OM';
       payment_status: BackendPickupRequest['payment_status'];
       collector_arrived_at: string | null;
       cash_collected_at: string | null;

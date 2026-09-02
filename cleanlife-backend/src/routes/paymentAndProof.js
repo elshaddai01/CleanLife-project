@@ -30,7 +30,14 @@ router.post('/:id/arrive', requireAuth, requireRole('collector'), async (req, re
         }
         const row = result.rows[0];
 
-        if (row.payment_method === 'MOMO') {
+        // [PAY-OM-02] MOMO (MTN) and OM (Orange Money) both go through the
+        // same pawaPay Request-to-Pay flow — only the correspondent differs.
+        // Note: this pawaPay account currently only has MTN_MOMO_CMR enabled
+        // (confirmed via /v2/active-conf) — ORANGE_CMR deposits will be
+        // REJECTED by pawaPay until Orange is activated on the dashboard.
+        // Non-fatal either way; see [MOMO-05] above.
+        if (row.payment_method === 'MOMO' || row.payment_method === 'OM') {
+            const correspondent = row.payment_method === 'OM' ? 'ORANGE_CMR' : 'MTN_MOMO_CMR';
             try {
                 const clientLookup = await pool.query(
                     `SELECT phone_number, estimated_price_fcfa FROM clients c
@@ -43,16 +50,17 @@ router.post('/:id/arrive', requireAuth, requireRole('collector'), async (req, re
                     const payment = await pawapay.initiatePayment({
                         phoneNumber: clientRow.phone_number,
                         amount: clientRow.estimated_price_fcfa || 0,
+                        correspondent,
                     });
                     await pool.query(
                         'SELECT * FROM store_momo_deposit_id($1, $2, $3)',
                         [requestId, req.collector.sub, payment.depositId]
                     );
                     if (payment.status === 'ACCEPTED') {
-                        console.log(`[momo] Real Request-to-Pay sent for request ${requestId}, depositId=${payment.depositId}`);
+                        console.log(`[momo] Real Request-to-Pay sent for request ${requestId} via ${correspondent}, depositId=${payment.depositId}`);
                     } else {
                         console.error(
-                            `[momo] Deposit not accepted for request ${requestId}, depositId=${payment.depositId}, status=${payment.status}`,
+                            `[momo] Deposit not accepted for request ${requestId} via ${correspondent}, depositId=${payment.depositId}, status=${payment.status}`,
                             payment.failureReason || ''
                         );
                     }
@@ -61,7 +69,7 @@ router.post('/:id/arrive', requireAuth, requireRole('collector'), async (req, re
                 }
             } catch (momoError) {
                 // Non-fatal — the arrival itself already succeeded above.
-                console.error(`[momo] Failed to initiate real payment for request ${requestId}:`, momoError.message);
+                console.error(`[momo] Failed to initiate real payment for request ${requestId} via ${correspondent}:`, momoError.message);
             }
         }
 

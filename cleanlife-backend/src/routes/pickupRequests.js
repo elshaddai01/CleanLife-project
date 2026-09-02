@@ -12,7 +12,7 @@ const router = express.Router();
 
 const TIER_RANK = { Premium: 1, Gold: 2, Silver: 3 };
 const VALID_WASTE_TYPES = ['Organic', 'Recyclable', 'Hazardous', 'Heavy Debris'];
-const VALID_PAYMENT_METHODS = ['CASH', 'MOMO'];
+const VALID_PAYMENT_METHODS = ['MOMO', 'OM'];
 
 router.post('/', requireAuth, requireRole('client'), async (req, res) => {
     const { client_id, bag_count, waste_type, latitude, longitude, payment_method } = req.body;

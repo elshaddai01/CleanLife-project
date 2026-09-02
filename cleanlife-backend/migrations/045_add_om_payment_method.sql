@@ -1,0 +1,12 @@
+-- [PAY-OM-01] Cash is being retired as a selectable payment method in favor
+-- of Orange Money (OM) — both new digital options (MOMO, OM) go through the
+-- same pawaPay Request-to-Pay flow, just a different correspondent.
+--
+-- Deliberately NOT renaming 'CASH' to 'OM' — Postgres enum RENAME VALUE
+-- would relabel every historical row that was actually paid in cash as if
+-- it were an Orange Money payment, corrupting real transaction history.
+-- 'CASH' stays a valid (if now unused-by-the-app) enum value so existing
+-- rows keep their true payment method; only the application layer
+-- (VALID_PAYMENT_METHODS in pickupRequests.js, mobile payment picker)
+-- stops offering it for new requests.
+ALTER TYPE payment_method_enum ADD VALUE IF NOT EXISTS 'OM';

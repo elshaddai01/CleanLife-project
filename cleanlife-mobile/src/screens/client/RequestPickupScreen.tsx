@@ -27,7 +27,7 @@ type Props = {
 export default function RequestPickupScreen({ onBack, onCreated }: Props) {
   const [bagCount, setBagCount] = useState('3');
   const [wasteType, setWasteType] = useState<WasteType>('Organic');
-  const [paymentMethod, setPaymentMethod] = useState<'CASH' | 'MOMO'>('CASH');
+  const [paymentMethod, setPaymentMethod] = useState<'MOMO' | 'OM'>('MOMO');
   const [lat, setLat] = useState<number | null>(null);
   const [lng, setLng] = useState<number | null>(null);
   const [locating, setLocating] = useState(false);
@@ -139,7 +139,7 @@ export default function RequestPickupScreen({ onBack, onCreated }: Props) {
 
       <Text style={styles.label}>Payment method</Text>
       <View style={styles.pillRow}>
-        {(['CASH', 'MOMO'] as const).map((m) => (
+        {(['MOMO', 'OM'] as const).map((m) => (
           <Pressable
             key={m}
             style={[styles.pill, paymentMethod === m && styles.pillActive]}

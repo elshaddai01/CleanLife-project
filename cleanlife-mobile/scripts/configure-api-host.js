@@ -3,7 +3,13 @@ const os = require('os');
 const path = require('path');
 
 const EXCLUDED_ADAPTER = /virtual|vmware|virtualbox|vbox|hyper-v|vethernet|wsl|loopback|bluetooth/i;
-const PREFERRED_ADAPTER = /wi-?fi|wlan|wireless|ethernet|lan/i;
+// [PORT-FIX-2] Wi-Fi and Ethernet used to score equally, so when both were
+// active (common on a desktop with a wired connection) the pick was
+// effectively random — Expo Go on a phone only ever reaches this machine
+// over Wi-Fi, so a same-subnet-looking Ethernet IP silently broke the
+// phone connection about half the time. Wi-Fi now wins outright.
+const WIFI_ADAPTER = /wi-?fi|wlan|wireless/i;
+const OTHER_PREFERRED_ADAPTER = /ethernet|lan/i;
 
 function isPrivateIPv4(address) {
   return /^10\./.test(address)
@@ -17,7 +23,7 @@ const candidates = Object.entries(os.networkInterfaces()).flatMap(([name, addres
     .map((entry) => ({
       name,
       address: entry.address,
-      score: (PREFERRED_ADAPTER.test(name) ? 10 : 0) - (EXCLUDED_ADAPTER.test(name) ? 100 : 0),
+      score: (WIFI_ADAPTER.test(name) ? 20 : OTHER_PREFERRED_ADAPTER.test(name) ? 10 : 0) - (EXCLUDED_ADAPTER.test(name) ? 100 : 0),
     }))
 );
 
