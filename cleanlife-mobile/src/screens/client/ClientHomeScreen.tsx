@@ -5,23 +5,23 @@ import { walletApi, pickupApi, ApiError, clearSession } from '../../apiClient';
 type Props = {
   onRequestPickup: () => void;
   onOpenWallet: () => void;
-  onViewRequests: () => void;
   onOpenTracking: (requestId: number) => void;
-  onOpenProfile: () => void;
   onLogout: () => void;
   lastRequestId: number | null;
   onRecentRequest: (requestId: number) => void;
+  onAddBin: () => void;
+  onReportFullBin: () => void;
 };
 
 export default function ClientHomeScreen({
   onRequestPickup,
   onOpenWallet,
-  onViewRequests,
   onOpenTracking,
-  onOpenProfile,
   onLogout,
   lastRequestId,
   onRecentRequest,
+  onAddBin,
+  onReportFullBin,
 }: Props) {
   const [balance, setBalance] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
@@ -77,21 +77,23 @@ export default function ClientHomeScreen({
         <Text style={styles.requestText}>Request a pickup</Text>
       </Pressable>
 
+      <View style={styles.binRow}>
+        <Pressable style={styles.binButton} onPress={onReportFullBin}>
+          <Text style={styles.binButtonEmoji}>🗑️</Text>
+          <Text style={styles.binButtonText}>Report a full bin</Text>
+        </Pressable>
+        <Pressable style={styles.binButton} onPress={onAddBin}>
+          <Text style={styles.binButtonEmoji}>📍</Text>
+          <Text style={styles.binButtonText}>Add a bin</Text>
+        </Pressable>
+      </View>
+
       {lastRequestId && (
         <Pressable style={styles.trackCard} onPress={() => onOpenTracking(lastRequestId)}>
           <Text style={styles.trackTitle}>Track your last request</Text>
           <Text style={styles.trackSubtitle}>Request #{lastRequestId} →</Text>
         </Pressable>
       )}
-
-      <Pressable style={styles.historyButton} onPress={onViewRequests}>
-        <Text style={styles.historyTitle}>View all requests</Text>
-        <Text style={styles.historySubtitle}>Open your complete pickup history →</Text>
-      </Pressable>
-
-      <Pressable style={styles.profileButton} onPress={onOpenProfile}>
-        <Text style={styles.profileText}>My profile</Text>
-      </Pressable>
     </ScrollView>
   );
 }
@@ -116,6 +118,19 @@ const styles = StyleSheet.create({
   },
   requestEmoji: { fontSize: 40, marginBottom: 8 },
   requestText: { fontSize: 17, fontWeight: '800', color: '#065f46' },
+  binRow: { flexDirection: 'row', gap: 10, marginBottom: 16 },
+  binButton: {
+    flex: 1,
+    backgroundColor: '#fff',
+    borderRadius: 12,
+    paddingVertical: 14,
+    alignItems: 'center',
+    borderWidth: 1.5,
+    borderColor: '#65a892',
+    borderStyle: 'dashed',
+  },
+  binButtonEmoji: { fontSize: 22, marginBottom: 4 },
+  binButtonText: { fontSize: 12, fontWeight: '700', color: '#065f46', textAlign: 'center' },
   trackCard: {
     backgroundColor: '#ecfdf5',
     borderRadius: 14,
@@ -125,8 +140,4 @@ const styles = StyleSheet.create({
   },
   trackTitle: { fontSize: 14, fontWeight: '700', color: '#065f46' },
   trackSubtitle: { fontSize: 13, color: '#059669', marginTop: 4 },
-  historyButton: { marginTop: 14, backgroundColor: '#fff', borderWidth: 1, borderColor: '#cbd5e1', borderRadius: 14, padding: 16 },
-  historyTitle: { color: '#1e293b', fontWeight: '800' }, historySubtitle: { color: '#64748b', fontSize: 12, marginTop: 4 },
-  profileButton: { marginTop: 14, paddingVertical: 14, alignItems: 'center' },
-  profileText: { color: '#475569', fontWeight: '700' },
 });

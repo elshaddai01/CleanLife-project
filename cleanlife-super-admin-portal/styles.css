@@ -25,3 +25,14 @@ th { background: #f1f5f9; }
 .stat-value { font-size: 28px; font-weight: 900; color: #7c3aed; }
 .stat-label { font-size: 12px; color: #64748b; margin-top: 4px; }
 .grant-btn { background: #059669; padding: 6px 12px; font-size: 12px; margin: 0; }
+.hint { font-size: 12px; color: #94a3b8; margin-top: 4px; margin-bottom: 14px; }
+.export-btn { background: #475569; padding: 5px 12px; font-size: 12px; margin-left: 10px; }
+.action-btn { background: #0891b2; padding: 5px 10px; font-size: 11px; margin: 0 4px 0 0; }
+.resolve-btn { background: #059669; }
+.reopen-btn { background: #d97706; }
+.merge-btn { background: #dc2626; }
+.status-pill { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 11px; font-weight: 700; }
+.status-open { background: #fef3c7; color: #92400e; }
+.status-resolved { background: #d1fae5; color: #065f46; }
+.neighborhood-cell { display: flex; align-items: center; gap: 6px; }
+.tag-link { font-size: 11px; color: #7c3aed; cursor: pointer; text-decoration: underline; }

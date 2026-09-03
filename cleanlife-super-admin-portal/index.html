@@ -29,6 +29,7 @@
     <nav class="tabs">
       <button class="tab-btn active" data-tab="overview">Overview</button>
       <button class="tab-btn" data-tab="companies">Companies</button>
+      <button class="tab-btn" data-tab="reports">Reports</button>
     </nav>
 
     <section id="tab-overview" class="tab-panel">
@@ -51,6 +52,38 @@
       <button id="refresh-companies">Refresh</button>
       <table id="companies-table">
         <thead><tr><th>ID</th><th>Name</th><th>Code</th><th>Tier</th><th>Give portal access</th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </section>
+
+    <section id="tab-reports" class="tab-panel hidden">
+      <h2>Community bin reports</h2>
+      <p class="hint">Filters apply to both tables below. Photos open in a new tab. Use "Merge" if the same physical bin ended up as two separate entries.</p>
+      <div class="form-row">
+        <input id="rpt-neighborhood" placeholder="Neighborhood (partial match)" />
+        <select id="rpt-status">
+          <option value="">Any status</option>
+          <option value="open">Open</option>
+          <option value="resolved">Resolved</option>
+        </select>
+        <input id="rpt-date-from" type="date" />
+        <input id="rpt-date-to" type="date" />
+        <button id="rpt-apply-filters">Apply filters</button>
+      </div>
+
+      <h3>Attributed reports <button id="rpt-export-attributed" class="export-btn">Export CSV</button></h3>
+      <table id="attributed-reports-table">
+        <thead>
+          <tr><th>ID</th><th>Bin</th><th>Type</th><th>Reporter</th><th>Neighborhood</th><th>Status</th><th>Date</th><th>Photo</th><th>Actions</th></tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+
+      <h3>Anonymous reports <button id="rpt-export-anonymous" class="export-btn">Export CSV</button></h3>
+      <table id="anonymous-reports-table">
+        <thead>
+          <tr><th>ID</th><th>Bin</th><th>Type</th><th>Neighborhood</th><th>Status</th><th>Date</th><th>Photo</th><th>Actions</th></tr>
+        </thead>
         <tbody></tbody>
       </table>
     </section>

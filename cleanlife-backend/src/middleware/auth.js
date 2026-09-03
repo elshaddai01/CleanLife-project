@@ -41,6 +41,29 @@ async function requireAuth(req, res, next) {
     }
 }
 
+// [BIN-07] For public, no-auth-required routes (community bin reporting)
+// that still want to silently attribute a report to a logged-in user when
+// one happens to be present. Never rejects — a missing, malformed, or
+// invalid token just means the request proceeds unauthenticated, same as
+// no header at all. Unlike requireAuth, a bad token here is not an error.
+function optionalAuth(req, res, next) {
+    const header = req.headers.authorization || '';
+    const [scheme, token] = header.split(' ');
+
+    if (scheme !== 'Bearer' || !token || tokenBlacklist.has(token)) {
+        return next();
+    }
+
+    try {
+        const decoded = verifyTokenLegacy(token);
+        req.user = decoded;
+        req.collector = decoded;
+    } catch {
+        // Invalid/expired token — proceed as anonymous rather than reject.
+    }
+    return next();
+}
+
 function requireAdminKey(req, res, next) {
     const key = req.headers['x-admin-key'];
     if (!key || key !== config.adminApiKey) {
@@ -123,6 +146,7 @@ function blacklistToken(token) {
 
 module.exports = {
     requireAuth,
+    optionalAuth,
     requireAdminKey,
     requireRole,
     requireAdminRole,

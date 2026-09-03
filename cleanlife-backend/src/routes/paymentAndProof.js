@@ -153,10 +153,20 @@ router.post('/:id/proof-of-work', requireAuth, requireRole('collector'), async (
     }
 
     try {
+        // [BIN-18] assigned_dumpster_id is locked in once, at claim time
+        // (migration 051) — verification checks against this specific bin,
+        // never a fresh "nearest available" lookup at submission time.
+        const requestLookup = await pool.query(
+            'SELECT assigned_dumpster_id FROM pickup_requests WHERE id = $1',
+            [requestId]
+        );
+        const assignedDumpsterId = requestLookup.rows[0]?.assigned_dumpster_id ?? null;
+
         const { isVerified, verificationMethod, dumpsterId } = await verifyDisposal({
             exifLatitude: exif_latitude,
             exifLongitude: exif_longitude,
             binCode: bin_code,
+            assignedDumpsterId,
         });
 
         const proofParams = [requestId, req.collector.sub, photo_storage_url, exif_latitude, exif_longitude, verificationMethod, dumpsterId, isVerified];

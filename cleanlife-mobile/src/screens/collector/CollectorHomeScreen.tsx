@@ -8,9 +8,19 @@ type Props = {
   onLogout: () => void;
   onOpenProfile: () => void;
   onResumeJob: (requestId: number) => void;
+  onAddBin: () => void;
+  onReportFullBin: () => void;
 };
 
-export default function CollectorHomeScreen({ onViewJobs, onOpenWallet, onLogout, onOpenProfile, onResumeJob }: Props) {
+export default function CollectorHomeScreen({
+  onViewJobs,
+  onOpenWallet,
+  onLogout,
+  onOpenProfile,
+  onResumeJob,
+  onAddBin,
+  onReportFullBin,
+}: Props) {
   const [balance, setBalance] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [activeJobId, setActiveJobId] = useState<number | null>(null);
@@ -66,6 +76,17 @@ export default function CollectorHomeScreen({ onViewJobs, onOpenWallet, onLogout
         <Text style={styles.jobsText}>View available jobs</Text>
       </Pressable>
 
+      <View style={styles.binRow}>
+        <Pressable style={styles.binButton} onPress={onReportFullBin}>
+          <Text style={styles.binButtonEmoji}>🗑️</Text>
+          <Text style={styles.binButtonText}>Report a full bin</Text>
+        </Pressable>
+        <Pressable style={styles.binButton} onPress={onAddBin}>
+          <Text style={styles.binButtonEmoji}>📍</Text>
+          <Text style={styles.binButtonText}>Add a bin</Text>
+        </Pressable>
+      </View>
+
       {activeJobId && (
         <Pressable style={styles.activeCard} onPress={() => onResumeJob(activeJobId)}>
           <Text style={styles.activeTitle}>Resume active job #{activeJobId}</Text>
@@ -99,6 +120,19 @@ const styles = StyleSheet.create({
   },
   jobsEmoji: { fontSize: 40, marginBottom: 8 },
   jobsText: { fontSize: 17, fontWeight: '800', color: '#0e7490' },
+  binRow: { flexDirection: 'row', gap: 10, marginTop: 16 },
+  binButton: {
+    flex: 1,
+    backgroundColor: '#fff',
+    borderRadius: 12,
+    paddingVertical: 14,
+    alignItems: 'center',
+    borderWidth: 1.5,
+    borderColor: '#65a892',
+    borderStyle: 'dashed',
+  },
+  binButtonEmoji: { fontSize: 22, marginBottom: 4 },
+  binButtonText: { fontSize: 12, fontWeight: '700', color: '#065f46', textAlign: 'center' },
   activeCard: { marginTop: 16, padding: 16, borderRadius: 14, backgroundColor: '#ecfeff', borderWidth: 1, borderColor: '#67e8f9' },
   activeTitle: { color: '#0e7490', fontWeight: '800' }, activeText: { color: '#0891b2', marginTop: 4, fontSize: 12 },
   profileButton: { marginTop: 14, paddingVertical: 14, alignItems: 'center' }, profileText: { color: '#475569', fontWeight: '700' },

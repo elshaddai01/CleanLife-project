@@ -16,8 +16,11 @@ const ratingsRouter = require('./src/routes/ratings');
 const uploadsRouter = require('./src/routes/uploads');
 const notificationsRouter = require('./src/routes/notifications');
 const { startDispatchWorker } = require('./src/queues/dispatchWorker');
+const { startBinEscalationWorker } = require('./src/queues/binEscalationWorker');
 const { pool, checkDatabaseConnection } = require('./src/db/pool');
 const etaRouter = require('./src/routes/etaRoutes');
+const binsRouter = require('./src/routes/bins');
+const reportsRouter = require('./src/routes/reports');
 const app = express();
 app.disable('x-powered-by');
 app.use(cors({
@@ -42,6 +45,8 @@ app.use('/ratings', ratingsRouter);
 app.use('/uploads', uploadsRouter);
 app.use('/notifications', notificationsRouter);
 app.use('/eta', etaRouter);
+app.use('/bins', binsRouter);
+app.use('/admin/reports', reportsRouter);
 app.get('/health', async (req, res) => {
     try {
         const database = await checkDatabaseConnection();
@@ -65,12 +70,14 @@ async function startServer() {
         throw new Error(`Connected to ${database.database_name}, expected ${config.databaseName}`);
     }
     const dispatchWorker = startDispatchWorker();
+    const binEscalationWorker = startBinEscalationWorker();
     const server = app.listen(config.port, '0.0.0.0', () => {
         console.log(`CleanLife API listening on http://0.0.0.0:${config.port} (database: ${database.database_name})`);
     });
     const shutdown = (signal) => {
         console.log(`${signal} received; shutting down`);
         dispatchWorker.close();
+        binEscalationWorker.close();
         server.close(async () => {
             await pool.end();
             process.exit(0);

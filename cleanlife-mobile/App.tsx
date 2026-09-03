@@ -21,10 +21,16 @@ import ActiveJobScreen from './src/screens/collector/ActiveJobScreen';
 
 import WalletScreen from './src/screens/shared/WalletScreen';
 import SettingsScreen from './src/screens/shared/SettingsScreen';
+import AddBinScreen from './src/screens/shared/AddBinScreen';
+import ReportFullBinScreen from './src/screens/shared/ReportFullBinScreen';
 
 import { LanguageProvider } from './src/i18n/LanguageContext';
 
-type Phase = 'checking' | 'splash' | 'role_select' | 'auth' | 'password_reset' | 'client_app' | 'collector_app';
+// [BIN-24] add_bin/report_full_bin are reachable from role_select
+// (fully anonymous, no login at all) AND from inside client_app/collector_app
+// (logged in, token silently attached). previousPhase remembers which one so
+// onBack/onDone return to wherever the user actually came from.
+type Phase = 'checking' | 'splash' | 'role_select' | 'auth' | 'password_reset' | 'client_app' | 'collector_app' | 'add_bin' | 'report_full_bin';
 
 // 'profile' now renders SettingsScreen (hub) instead of the profile
 // screens directly — those live inside SettingsScreen to avoid duplication.
@@ -44,6 +50,8 @@ export default function App() {
 
   const [collectorScreen, setCollectorScreen] = useState<CollectorScreen>('home');
   const [activeJobId, setActiveJobId] = useState<number | null>(null);
+
+  const [previousPhase, setPreviousPhase] = useState<Phase>('role_select');
 
   useEffect(() => {
     (async () => {
@@ -81,6 +89,18 @@ export default function App() {
   }, []);
 
   const handleRecentRequest = useCallback((id: number) => setLastRequestId(id), []);
+
+  const openAddBin = useCallback(() => {
+    setPreviousPhase(phase);
+    setPhase('add_bin');
+  }, [phase]);
+
+  const openReportFullBin = useCallback(() => {
+    setPreviousPhase(phase);
+    setPhase('report_full_bin');
+  }, [phase]);
+
+  const closeBinFlow = useCallback(() => setPhase(previousPhase), [previousPhase]);
 
   const handleClientTabSelect = useCallback((tab: TabKey) => {
     if (tab === 'home') setClientScreen('home');
@@ -133,8 +153,13 @@ export default function App() {
                 setRole(r);
                 setPhase('auth');
               }}
+              onAddBin={openAddBin}
+              onReportFullBin={openReportFullBin}
             />
           )}
+
+          {phase === 'add_bin' && <AddBinScreen onBack={closeBinFlow} onDone={closeBinFlow} />}
+          {phase === 'report_full_bin' && <ReportFullBinScreen onBack={closeBinFlow} onDone={closeBinFlow} />}
 
           {phase === 'auth' && (
             <AuthScreen
@@ -161,14 +186,14 @@ export default function App() {
               lastRequestId={lastRequestId}
               onRequestPickup={() => setClientScreen('request')}
               onOpenWallet={() => setClientScreen('wallet')}
-              onViewRequests={() => setClientScreen('requests')}
               onOpenTracking={(id) => {
                 setTrackingId(id);
                 setClientScreen('track');
               }}
-              onOpenProfile={() => setClientScreen('profile')}
               onLogout={handleLogout}
               onRecentRequest={handleRecentRequest}
+              onAddBin={openAddBin}
+              onReportFullBin={openReportFullBin}
             />
           )}
           {phase === 'client_app' && clientScreen === 'request' && (
@@ -216,6 +241,8 @@ export default function App() {
                 setActiveJobId(id);
                 setCollectorScreen('active_job');
               }}
+              onAddBin={openAddBin}
+              onReportFullBin={openReportFullBin}
             />
           )}
           {phase === 'collector_app' && collectorScreen === 'jobs' && (

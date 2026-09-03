@@ -7,6 +7,65 @@
 
 export type LatLng = { lat: number; lng: number };
 
+// [BIN-19] Single-marker map for AddBinScreen: user starts at their current
+// GPS location, can drag the pin to nudge it, and the RN side reads back
+// the current pin position via WebView's onMessage (window.ReactNativeWebView
+// .postMessage) — the first postMessage/injectJavaScript pattern in this
+// codebase to go WebView -> RN rather than only RN -> WebView.
+export function buildDraggablePinMapHtml(initialPosition: LatLng, markerColor: string) {
+  return `
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <style>
+    html, body, #map { height: 100%; margin: 0; padding: 0; }
+    .hint {
+      position: fixed; bottom: 16px; left: 16px; right: 16px;
+      background: rgba(15,23,42,0.85); color: #fff; border-radius: 12px;
+      padding: 10px 14px; font-family: -apple-system, Roboto, sans-serif;
+      font-size: 13px; text-align: center; z-index: 1000;
+    }
+  </style>
+</head>
+<body>
+  <div id="map"></div>
+  <div class="hint">Drag the pin to the exact bin location</div>
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script>
+    var pos = [${initialPosition.lat}, ${initialPosition.lng}];
+    var map = L.map('map', { zoomControl: false, attributionControl: false }).setView(pos, 18);
+
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      maxZoom: 19,
+    }).addTo(map);
+
+    var pinIcon = L.divIcon({
+      className: '',
+      html: '<div style="background:${markerColor};width:22px;height:22px;border-radius:11px 11px 11px 0;transform:rotate(-45deg);border:3px solid #fff;box-shadow:0 2px 6px rgba(0,0,0,0.4);"></div>',
+      iconSize: [22, 22],
+      iconAnchor: [11, 22],
+    });
+
+    var marker = L.marker(pos, { icon: pinIcon, draggable: true }).addTo(map);
+
+    function reportPosition() {
+      var p = marker.getLatLng();
+      if (window.ReactNativeWebView) {
+        window.ReactNativeWebView.postMessage(JSON.stringify({ lat: p.lat, lng: p.lng }));
+      }
+    }
+
+    marker.on('dragend', reportPosition);
+    reportPosition();
+  </script>
+</body>
+</html>
+  `;
+}
+
 export type MapOptions = {
   // [NAV-01] Real turn-by-turn directions for the collector, sourced from
   // OSRM's free public routing API (router.project-osrm.org) — no API key

@@ -13,6 +13,8 @@ const MOBILITY_RULES = [
 ];
 
 // Finds the nearest dumpster (by geography distance in meters) to a point.
+// [BIN-32] Excludes dumpsters merged away as duplicates (see admin_merge_dumpsters) —
+// a merged dumpster shouldn't drive a brand new mobility/price estimate.
 async function findNearestDumpster(latitude, longitude) {
     const result = await pool.query(
         `SELECT id,
@@ -22,6 +24,7 @@ async function findNearestDumpster(latitude, longitude) {
                     power(sin(radians(longitude - $2) / 2), 2)
                 )) AS distance_meters
          FROM dumpsters
+         WHERE merged_into_dumpster_id IS NULL
          ORDER BY distance_meters
          LIMIT 1`,
         [latitude, longitude]

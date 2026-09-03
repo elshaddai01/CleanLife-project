@@ -3,9 +3,14 @@ const config = require('../config/env');
 
 const GEOFENCE_RADIUS_METERS = 100;
 
-// [POW-04] GPS path: is there an authorized dumpster within 100m of the
-// EXIF coordinates? Distance is computed in meters with the Haversine formula.
-async function findDumpsterWithinGeofence(latitude, longitude) {
+// [BIN-16] Checks distance against ONE specific dumpster (the request's
+// assigned_dumpster_id, locked in at claim time — see migration 051) rather
+// than searching for whichever dumpster happens to be nearest right now.
+// A bin reported full AFTER this collector was assigned to it must not
+// invalidate a disposal that's otherwise legitimate — status plays no part
+// in this check at all, only "is this the bin they were assigned, and are
+// they within range of it."
+async function isWithinGeofenceOfDumpster(latitude, longitude, dumpsterId) {
     const result = await pool.query(
         `SELECT id,
                 6371000 * 2 * asin(sqrt(
@@ -14,34 +19,46 @@ async function findDumpsterWithinGeofence(latitude, longitude) {
                     power(sin(radians(longitude - $2) / 2), 2)
                 )) AS distance_meters
          FROM dumpsters
-         ORDER BY distance_meters
-         LIMIT 1`,
-        [latitude, longitude]
+         WHERE id = $3`,
+        [latitude, longitude, dumpsterId]
     );
-    const nearest = result.rows[0] || null;
-    return nearest && Number(nearest.distance_meters) <= GEOFENCE_RADIUS_METERS ? nearest : null;
+    const row = result.rows[0] || null;
+    return row && Number(row.distance_meters) <= GEOFENCE_RADIUS_METERS ? row : null;
 }
 
-// [POW-05] Bin-code fallback: an explicit code entry always overrides
-// spatial validation, per SRS 4.4 — no distance check at all once a valid
-// code is given.
-async function findDumpsterByBinCode(binCode) {
-    const result = await pool.query('SELECT id FROM dumpsters WHERE bin_code = $1', [binCode]);
+// [BIN-17] Bin-code fallback also constrained to the assigned bin now —
+// letting a code for a DIFFERENT dumpster count as valid would let a
+// collector bypass the claim-time lock entirely (dispose wherever, just
+// type in any bin's code), defeating the point of locking one bin in per
+// job. Same SRS-4.4 "no distance check once a valid code is given" idea,
+// just scoped to "valid code for THIS job's bin" instead of "valid code
+// for any bin in the system."
+async function findAssignedDumpsterByBinCode(binCode, assignedDumpsterId) {
+    const result = await pool.query(
+        'SELECT id FROM dumpsters WHERE bin_code = $1 AND id = $2',
+        [binCode, assignedDumpsterId]
+    );
     return result.rows[0] || null;
 }
 
 // Returns { isVerified, verificationMethod, dumpsterId }
-async function verifyDisposal({ exifLatitude, exifLongitude, binCode }) {
+async function verifyDisposal({ exifLatitude, exifLongitude, binCode, assignedDumpsterId }) {
     // [DEV-BYPASS] When AUTO_VERIFY_GPS_PROOF is enabled (default true unless
     // explicitly set to 'false' in .env), skip the real geofence/bin-code
     // check entirely — for local testing without seeded dumpster data.
     // MUST be disabled before any real deployment.
     if (config.autoVerifyGpsProof) {
-        return { isVerified: true, verificationMethod: 'gps', dumpsterId: null };
+        return { isVerified: true, verificationMethod: 'gps', dumpsterId: assignedDumpsterId ?? null };
+    }
+
+    if (!assignedDumpsterId) {
+        // No dumpster was ever locked in for this request (e.g. none existed
+        // anywhere in the system at claim time) — nothing to verify against.
+        return { isVerified: false, verificationMethod: binCode ? 'bin_code' : 'gps', dumpsterId: null };
     }
 
     if (binCode) {
-        const dumpster = await findDumpsterByBinCode(binCode);
+        const dumpster = await findAssignedDumpsterByBinCode(binCode, assignedDumpsterId);
         if (dumpster) {
             return { isVerified: true, verificationMethod: 'bin_code', dumpsterId: dumpster.id };
         }
@@ -52,7 +69,7 @@ async function verifyDisposal({ exifLatitude, exifLongitude, binCode }) {
         return { isVerified: false, verificationMethod: 'gps', dumpsterId: null };
     }
 
-    const dumpster = await findDumpsterWithinGeofence(exifLatitude, exifLongitude);
+    const dumpster = await isWithinGeofenceOfDumpster(exifLatitude, exifLongitude, assignedDumpsterId);
     if (dumpster) {
         return { isVerified: true, verificationMethod: 'gps', dumpsterId: dumpster.id };
     }

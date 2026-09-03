@@ -488,6 +488,71 @@ export const uploadApi = {
       body: JSON.stringify({ base64, mime_type }),
     });
   },
+
+  // [BIN-20] Same storage as uploadProofSnapshot, but for the community
+  // bin-reporting flow — must work with no token at all.
+  uploadPublicPhoto(base64: string, mime_type: 'image/jpeg' | 'image/png') {
+    return request<{ url: string }>('/uploads/public', {
+      method: 'POST',
+      body: JSON.stringify({ base64, mime_type }),
+    });
+  },
+};
+
+// ---------- Community bin reporting ----------
+// [BIN-21] Every call here hits a public, no-auth-required backend route
+// (see cleanlife-backend/src/routes/bins.js). A token is still attached
+// automatically by request() when one exists (default behavior — see its
+// requireAuth param), so a logged-in user gets silently attributed server-
+// side via optionalAuth; a logged-out user's calls work identically with
+// no token at all. Nothing here ever requires login.
+export type BinStatus = 'empty' | 'medium' | 'full';
+
+export interface Bin {
+  id: number;
+  latitude: string;
+  longitude: string;
+  bin_code: string | null;
+  status: BinStatus;
+}
+
+export interface NearbyBin extends Bin {
+  distance_meters: number;
+}
+
+// Deliberately NOT passing requireAuth=false here — that would suppress
+// attaching a token even when one exists. Leaving the default (true) means
+// "attach a token if the device has one, but don't require it" — exactly
+// what optionalAuth needs to silently attribute logged-in callers while
+// staying fully functional for logged-out ones (no token -> no header,
+// same as omitting one entirely).
+export const binsApi = {
+  addBin(params: { latitude: number; longitude: number; photo_url: string }) {
+    return request<{ created: boolean; bin: Bin; message: string }>('/bins', {
+      method: 'POST',
+      body: JSON.stringify(params),
+    });
+  },
+
+  confirmBin(binId: number, params: { latitude: number; longitude: number; photo_url: string }) {
+    return request<{ id: number; message: string }>(`/bins/${binId}/confirm`, {
+      method: 'POST',
+      body: JSON.stringify(params),
+    });
+  },
+
+  reportFull(binId: number, params: { latitude: number; longitude: number; photo_url: string }) {
+    return request<{ id: number; status: BinStatus; full_since: string | null }>(`/bins/${binId}/report-full`, {
+      method: 'POST',
+      body: JSON.stringify(params),
+    });
+  },
+
+  nearby(latitude: number, longitude: number, radiusMeters = 2000) {
+    return request<NearbyBin[]>(`/bins/nearby?lat=${latitude}&lng=${longitude}&radius_m=${radiusMeters}`, {
+      method: 'GET',
+    });
+  },
 };
 
 // ---------- Live Location ----------

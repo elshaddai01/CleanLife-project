@@ -56,4 +56,5 @@ module.exports = Object.freeze({
     adminHoldMs: positiveInteger('ADMIN_HOLD_MS', 120000),
     tierCascadeStepMs: positiveInteger('TIER_CASCADE_STEP_MS', 300000),
     autoVerifyGpsProof: process.env.AUTO_VERIFY_GPS_PROOF !== 'false',
+    binEscalationPollMs: positiveInteger('BIN_ESCALATION_POLL_MS', 3600000),
 });

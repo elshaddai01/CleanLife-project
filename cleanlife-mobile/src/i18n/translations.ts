@@ -27,6 +27,11 @@ export const translations = {
     role_select_client_text: 'Request waste collection for your home or business.',
     role_select_collector_title: 'I collect waste',
     role_select_collector_text: 'Find nearby jobs and get paid for pickups.',
+    role_select_no_account_needed: 'No account needed',
+    role_select_report_full_bin_title: 'Report a full bin',
+    role_select_report_full_bin_text: 'Let us know a community bin needs emptying.',
+    role_select_add_bin_title: 'Add a bin',
+    role_select_add_bin_text: "Mark a community bin's location on the map.",
   },
   fr: {
     tab_home: 'Accueil',
@@ -48,6 +53,11 @@ export const translations = {
     role_select_client_text: 'Demandez la collecte des déchets pour votre domicile ou entreprise.',
     role_select_collector_title: 'Je collecte les déchets',
     role_select_collector_text: 'Trouvez des missions à proximité et soyez payé pour vos collectes.',
+    role_select_no_account_needed: 'Aucun compte requis',
+    role_select_report_full_bin_title: 'Signaler une poubelle pleine',
+    role_select_report_full_bin_text: 'Signalez qu\'une poubelle communautaire doit être vidée.',
+    role_select_add_bin_title: 'Ajouter une poubelle',
+    role_select_add_bin_text: "Indiquez l'emplacement d'une poubelle communautaire sur la carte.",
   },
 } as const;
 
